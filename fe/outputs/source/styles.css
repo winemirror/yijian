@@ -750,7 +750,7 @@ select:focus {
 .tabs {
   height: 48px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-bottom: 1px solid var(--line);
   background: #f4f1ea;
 }
@@ -1181,6 +1181,141 @@ select:focus {
 .chat-form input {
   min-width: 0;
   padding: 0 10px;
+}
+
+/* ---- LAN multiplayer panel ---- */
+.net-badge {
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid #b9d3bc;
+  background: #e7f2e8;
+  color: #2f6b36;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.net-badge.waiting {
+  border-color: #ddcfa6;
+  background: #f6efdc;
+  color: #8a6a1f;
+}
+
+#panel-net .section-block + .section-block {
+  margin-top: 14px;
+}
+
+#panel-net input[type="text"] {
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+#panel-net .btn {
+  margin-top: 10px;
+}
+
+#panel-net .section-head .btn {
+  margin-top: 0;
+}
+
+.net-rooms {
+  margin-top: 8px;
+}
+
+.net-room {
+  width: 100%;
+  padding: 9px 11px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-strong);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.net-room:hover {
+  border-color: #a99f90;
+}
+
+.net-room-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.net-room-meta {
+  margin-left: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.net-manual {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.net-manual input {
+  flex: 1;
+}
+
+.net-manual .btn {
+  margin-top: 0;
+  margin-left: 6px;
+}
+
+.net-status {
+  padding: 12px;
+  border: 1px solid #cfe0d1;
+  border-radius: 8px;
+  background: #eef6ef;
+}
+
+.net-status-text {
+  font-size: 14px;
+  font-weight: 700;
+  color: #2f6b36;
+}
+
+.net-detail {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.net-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.net-actions .btn {
+  margin: 0 8px 8px 0;
+}
+
+.net-log {
+  margin-top: 12px;
+  padding: 10px 12px;
+  min-height: 80px;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-strong);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 /* Older WebViews (Chrome 57-83, roughly Android 8-11) understand grid `gap`

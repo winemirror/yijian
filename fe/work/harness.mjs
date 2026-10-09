@@ -39,7 +39,7 @@ function makeElement() {
     removeEventListener() {},
     children,
     appendChild(child) { children.push(child); return child; },
-    append() {},
+    append(...nodes) { for (const node of nodes) children.push(node); },
     replaceChildren(...nodes) { children.length = 0; children.push(...nodes); },
     querySelector() { return null; },
     querySelectorAll() { return []; },
@@ -135,6 +135,11 @@ export function loadEngine(jsPath, aiDataPath = AI_DATA_PATH, options = {}) {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(aiDataPath, "utf8"), sandbox, { filename: aiDataPath });
+  // Lets a test inject extra globals (e.g. a stub XiangqiNet) before the app
+  // file is evaluated, mirroring how the real page loads net.js first.
+  if (typeof options.beforeEngine === "function") {
+    options.beforeEngine(sandbox, win);
+  }
   vm.runInContext(fs.readFileSync(jsPath, "utf8"), sandbox, { filename: jsPath });
 
   const api = win.XiangqiLocal;

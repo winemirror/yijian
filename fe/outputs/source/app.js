@@ -2461,7 +2461,25 @@
     liveMode: document.getElementById("liveMode"),
     chatLog: document.getElementById("chatLog"),
     chatForm: document.getElementById("chatForm"),
-    chatInput: document.getElementById("chatInput")
+    chatInput: document.getElementById("chatInput"),
+    chatNote: document.getElementById("chatNote"),
+    netBadge: document.getElementById("netBadge"),
+    netUnavailable: document.getElementById("netUnavailable"),
+    netIdle: document.getElementById("netIdle"),
+    netActive: document.getElementById("netActive"),
+    netRoomName: document.getElementById("netRoomName"),
+    netSide: document.getElementById("netSide"),
+    netHost: document.getElementById("netHost"),
+    netRooms: document.getElementById("netRooms"),
+    netRefresh: document.getElementById("netRefresh"),
+    netManual: document.getElementById("netManual"),
+    netManualJoin: document.getElementById("netManualJoin"),
+    netStatusText: document.getElementById("netStatusText"),
+    netDetail: document.getElementById("netDetail"),
+    netResign: document.getElementById("netResign"),
+    netNewGame: document.getElementById("netNewGame"),
+    netLeave: document.getElementById("netLeave"),
+    netLog: document.getElementById("netLog")
   };
 
   const state = {
@@ -2485,11 +2503,41 @@
     turnStartedAt: 0,
     endedAt: 0,
     soundOn: true,
-    session: 0
+    session: 0,
+    // LAN multiplayer. Inactive until a room is joined or hosted, so the
+    // single-player paths below stay exactly as they were.
+    net: {
+      active: false,
+      inRoom: false,
+      role: null,
+      mySide: null,
+      peerName: "",
+      peerSide: null,
+      phase: "idle",
+      mode: null,
+      available: false,
+      pendingUndo: false,
+      sentAt: 0
+    }
   };
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let allowAnimation = !prefersReducedMotion;
   let aiDriverToken = 0;
+
+  // Optional LAN layer. It stays null in plain browsers and inside the test
+  // harness, which disables the multiplayer entry points without touching any
+  // of the single-player paths.
+  const Net = (typeof window !== "undefined" && window.XiangqiNet) || null;
+
+  function netActive() {
+    return !!(state.net && state.net.active);
+  }
+
+  // In a net game the local player may only move on their own turn.
+  function canMoveLocally() {
+    if (!netActive()) return true;
+    return state.net.mySide === state.game.sideToMove;
+  }
 
   // The per-side <select> encodes both ownership and AI strength:
   // "human" or "ai:<levelKey>".
@@ -3235,7 +3283,7 @@
     render();
   }
 
-  async function performHumanMove(from, to) {
+  async function performHumanMove(from, to, options = {}) {
     state.selected = null;
     state.legalMoves = [];
     allowAnimation = !prefersReducedMotion;
@@ -3243,6 +3291,9 @@
     const ghost = captureCapturedGhost(from, to);
     const record = state.game.play(from, to);
     markMoveTiming(record);
+    // A local move in a net game has to reach the other side; a move that
+    // arrived from the wire must not be echoed back.
+    if (netActive() && !options.remote) netSendMove(record);
     state.live = true;
     state.reviewPly = state.game.history.length;
     const animationDuration = renderMove(record, ghost);
@@ -3357,6 +3408,9 @@
   // a human move always runs (options.reply), but continuous play - including a
   // full AI-vs-AI game - only runs while the play button is active.
   async function runAIDriver(options = {}) {
+    // In a net game both sides are driven by their own player, never by the
+    // local engine.
+    if (netActive()) return;
     const token = ++aiDriverToken;
     const session = state.session;
     let movesLeft = options.reply ? 1 : (state.playing ? Infinity : 0);
@@ -3434,7 +3488,7 @@
     return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
-  function resetGame() {
+  function resetGame(options = {}) {
     state.session += 1;
     aiDriverToken += 1;
     state.game = new XiangqiGame();
@@ -3450,11 +3504,24 @@
     refreshAnimationFlag();
     renderThinking();
     render();
-    appendChat("对手", "新对局开始，请多指教。", false);
+    if (netActive() && !options.remote) {
+      netSend({ t: "newGame" });
+      netLog("已请求重开新局");
+    } else if (!netActive()) {
+      appendChat("对手", "新对局开始，请多指教。", false);
+    }
     runAIDriver();
   }
 
-  function undo() {
+  function undo(options = {}) {
+    // In a net game an undo has to be agreed by the other side first.
+    if (netActive() && !options.remote) {
+      if (state.game.history.length === 0) return;
+      state.net.pendingUndo = true;
+      netSend({ t: "undoReq" });
+      netLog("已向对手发送悔棋请求");
+      return;
+    }
     // Cancel a move that is still being computed: undoing should win the race.
     state.session += 1;
     aiDriverToken += 1;
@@ -3514,6 +3581,7 @@
   function boardClick(event) {
     if (!state.live || state.busy || state.game.result.type !== "ongoing") return;
     if (state.control[state.game.sideToMove] !== "human") return;
+    if (!canMoveLocally()) return;
     const pieceElement = event.target.closest(".piece");
     if (pieceElement) {
       const square = Number(pieceElement.dataset.square);
@@ -3645,7 +3713,8 @@
       if (!button) return;
       const text = button.dataset.chat;
       appendChat("你", text, true);
-      respondToChat(text);
+      if (netActive()) netSend({ t: "chat", text });
+      else respondToChat(text);
     });
   });
 
@@ -3655,8 +3724,376 @@
     if (!text) return;
     elements.chatInput.value = "";
     appendChat("你", text, true);
-    respondToChat(text);
+    if (netActive()) netSend({ t: "chat", text });
+    else respondToChat(text);
   });
+
+  // ------------------------------------------------------------ LAN multiplayer
+  //
+  // Transport and WebRTC live in net.js. Everything below is the game protocol
+  // on top of it: who sits where, move exchange, chat, undo agreement, resign.
+
+  const netPlayerName = "棋友" + (Math.floor(Math.random() * 90) + 10);
+
+  function netLog(text) {
+    if (!elements.netLog || !text) return;
+    const stamp = new Date().toTimeString().slice(0, 8);
+    elements.netLog.textContent += `[${stamp}] ${text}\n`;
+    elements.netLog.scrollTop = elements.netLog.scrollHeight;
+  }
+
+  function netSend(message) {
+    if (!Net) return false;
+    const sent = Net.send(message);
+    if (!sent && state.net.inRoom) netLog("通道未就绪，发送被丢弃");
+    return sent;
+  }
+
+  function netSendMove(record) {
+    netSend({
+      t: "move",
+      from: record.from,
+      to: record.to,
+      ply: record.index,
+      elapsedMs: Math.max(0, Date.now() - (state.startedAt || Date.now())),
+      turnMs: defaultTo(record.moveTimeMs, 0)
+    });
+  }
+
+  function netBegin(role, mySide, peerName) {
+    state.net.active = true;
+    state.net.inRoom = true;
+    state.net.role = role;
+    state.net.mySide = mySide;
+    state.net.peerSide = opposite(mySide);
+    state.net.peerName = peerName || "对手";
+    state.net.phase = "connected";
+    state.net.pendingUndo = false;
+    // Both sides start from a clean board, so the two copies line up.
+    resetGame({ remote: true });
+    appendChat("系统", `已连接，我方执${mySide === RED ? "红" : "黑"}`, false);
+    netLog(`连接建立：我方执${mySide === RED ? "红" : "黑"}，对手 ${state.net.peerName}`);
+    netRender();
+  }
+
+  function netFinishByResign(loser) {
+    if (state.game.result.type !== "ongoing") return;
+    state.game.result = { type: "win", winner: opposite(loser), reason: "认输" };
+    state.endedAt = Date.now();
+    state.playing = false;
+    renderThinking();
+    render();
+  }
+
+  function netApplySync(snapshot) {
+    if (!snapshot) return;
+    try {
+      state.session += 1;
+      aiDriverToken += 1;
+      state.busy = false;
+      state.game.restore(snapshot);
+      state.live = true;
+      state.reviewPly = state.game.history.length;
+      state.selected = null;
+      state.legalMoves = [];
+      state.displayAnalysis = null;
+      renderThinking();
+      render();
+      netLog("已按对手的快照对齐棋局");
+    } catch (error) {
+      netLog("对齐失败：" + defaultTo(error && error.message, "unknown"));
+    }
+  }
+
+  function netApplyMove(message) {
+    if (!netActive() || state.game.result.type !== "ongoing") return;
+    if (state.net.mySide === state.game.sideToMove) {
+      // It is our turn, so a move from the opponent means the two boards have
+      // drifted apart. Ask for a snapshot instead of guessing.
+      netLog("收到的走子不在对手回合，请求对齐");
+      netSend({ t: "syncReq" });
+      return;
+    }
+    if (state.game.history.length !== message.ply) {
+      netLog("双方步数不一致，请求对齐");
+      netSend({ t: "syncReq" });
+      return;
+    }
+    if (typeof message.elapsedMs === "number") {
+      state.startedAt = Date.now() - message.elapsedMs;
+    }
+    if (typeof message.turnMs === "number") {
+      state.turnStartedAt = Date.now() - message.turnMs;
+    }
+    performHumanMove(message.from, message.to, { remote: true });
+  }
+
+  function netIncomingUndo() {
+    const ask = "对手请求悔棋，同意吗？";
+    const agreed = typeof window.confirm === "function" ? window.confirm(ask) : true;
+    if (agreed) {
+      netSend({ t: "undoOk" });
+      undo({ remote: true });
+      netLog("已同意对手悔棋");
+    } else {
+      netSend({ t: "undoNo" });
+      netLog("已拒绝对手悔棋");
+    }
+  }
+
+  function netHandleMessage(message) {
+    if (!message || !message.t) return;
+    switch (message.t) {
+      case "hello":
+        state.net.peerName = message.name || state.net.peerName || "对手";
+        if (state.net.role === "host") {
+          netBegin("host", state.net.mySide, state.net.peerName);
+          netSend({
+            t: "welcome",
+            proto: Net ? Net.proto : 1,
+            side: state.net.peerSide,
+            name: netPlayerName
+          });
+        }
+        break;
+      case "welcome":
+        if (state.net.role === "guest" && !state.net.active) {
+          netBegin("guest", message.side, message.name || "对手");
+        }
+        break;
+      case "move":
+        netApplyMove(message);
+        break;
+      case "chat":
+        appendChat(state.net.peerName || "对手", String(defaultTo(message.text, "")), false);
+        break;
+      case "undoReq":
+        netIncomingUndo();
+        break;
+      case "undoOk":
+        if (state.net.pendingUndo) {
+          state.net.pendingUndo = false;
+          netLog("对手同意悔棋");
+          undo({ remote: true });
+        }
+        break;
+      case "undoNo":
+        state.net.pendingUndo = false;
+        netLog("对手拒绝了悔棋");
+        break;
+      case "resign":
+        netFinishByResign(state.net.peerSide);
+        netLog("对手认输");
+        break;
+      case "newGame":
+        resetGame({ remote: true });
+        netLog("对手开始了新对局");
+        break;
+      case "syncReq":
+        netSend({ t: "sync", snapshot: state.game.snapshot() });
+        break;
+      case "sync":
+        netApplySync(message.snapshot);
+        break;
+      case "ping":
+        netSend({ t: "pong", at: message.at });
+        break;
+      case "pong":
+        state.net.rtt = Math.max(0, Date.now() - defaultTo(message.at, Date.now()));
+        netRender();
+        break;
+      default:
+        break;
+    }
+  }
+
+  function netRenderRooms(list) {
+    if (!elements.netRooms) return;
+    clearChildren(elements.netRooms);
+    if (!list || list.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "暂时没有发现房间";
+      elements.netRooms.appendChild(empty);
+      return;
+    }
+    list.forEach((room) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "net-room";
+      const name = document.createElement("span");
+      name.className = "net-room-name";
+      name.textContent = room.name || "未命名房间";
+      const meta = document.createElement("span");
+      meta.className = "net-room-meta";
+      meta.textContent = defaultTo(room.addr && (room.addr.ip || room.addr.id), "本机");
+      button.appendChild(name);
+      button.appendChild(meta);
+      button.addEventListener("click", () => netJoin(room));
+      elements.netRooms.appendChild(button);
+    });
+  }
+
+  function netRender() {
+    const net = state.net;
+    if (elements.netUnavailable) elements.netUnavailable.hidden = net.available;
+    if (elements.netIdle) elements.netIdle.hidden = net.inRoom;
+    if (elements.netActive) elements.netActive.hidden = !net.inRoom;
+    if (elements.netBadge) {
+      elements.netBadge.hidden = !net.inRoom;
+      if (net.inRoom) {
+        const side = net.mySide === RED ? "红" : net.mySide === BLACK ? "黑" : "待定";
+        elements.netBadge.textContent = net.active
+          ? `联机 · ${side} · ${net.rtt ? net.rtt + "ms" : "直连"}`
+          : "联机 · 等待对手";
+        elements.netBadge.classList.toggle("waiting", !net.active);
+      }
+    }
+    if (elements.netStatusText && net.inRoom) {
+      elements.netStatusText.textContent = net.active
+        ? (net.role === "host" ? "房间已建立，对局进行中" : "已加入房间，对局进行中")
+        : (net.role === "host" ? "正在广播房间，等待加入…" : "正在连接房间…");
+    }
+    if (elements.netDetail && net.inRoom) {
+      elements.netDetail.textContent = net.active
+        ? `对手：${net.peerName} · 通道：${net.mode || "-"}`
+        : `通道：${net.mode || "-"}`;
+    }
+    if (elements.chatNote) {
+      elements.chatNote.textContent = net.active
+        ? "联机聊天 · 消息会实时发给对手"
+        : "本地模拟聊天 · 不连接网络";
+    }
+  }
+
+  async function netScan() {
+    if (!Net || !state.net.available || state.net.inRoom) return;
+    const list = await Net.scan();
+    netRenderRooms(list);
+  }
+
+  async function netHost() {
+    if (!Net) return;
+    const preference = defaultTo(elements.netSide && elements.netSide.value, "red");
+    const side = preference === "random"
+      ? (Math.random() < 0.5 ? RED : BLACK)
+      : (preference === "black" ? BLACK : RED);
+    state.net.inRoom = true;
+    state.net.active = false;
+    state.net.role = "host";
+    state.net.mySide = side;
+    state.net.peerSide = opposite(side);
+    state.net.phase = "announcing";
+    await Net.hostRoom({
+      name: defaultTo(elements.netRoomName && elements.netRoomName.value.trim(), "") || "我的棋局",
+      player: netPlayerName
+    });
+    netLog(`正在广播房间，我方执${side === RED ? "红" : "黑"}`);
+    netRender();
+  }
+
+  async function netJoin(room) {
+    if (!Net || !room) return;
+    state.net.inRoom = true;
+    state.net.active = false;
+    state.net.role = "guest";
+    state.net.mySide = null;
+    state.net.peerSide = null;
+    state.net.phase = "connecting";
+    netLog(`正在连接「${room.name || "房间"}」…`);
+    netRender();
+    await Net.joinRoom(room, { player: netPlayerName });
+  }
+
+  function netLeave() {
+    if (Net) Net.leave();
+    if (state.net.inRoom) netLog("已离开房间");
+    state.net.active = false;
+    state.net.inRoom = false;
+    state.net.role = null;
+    state.net.mySide = null;
+    state.net.peerSide = null;
+    state.net.peerName = "";
+    state.net.phase = "idle";
+    state.net.pendingUndo = false;
+    netRender();
+  }
+
+  function netResign() {
+    if (!netActive()) return;
+    const ask = "确定认输吗？";
+    if (typeof window.confirm === "function" && !window.confirm(ask)) return;
+    netSend({ t: "resign" });
+    netFinishByResign(state.net.mySide);
+    netLog("我方认输");
+  }
+
+  function netManualJoin() {
+    if (!elements.netManual) return;
+    const raw = elements.netManual.value.trim();
+    if (!raw) return;
+    const parts = raw.split(":");
+    const ip = parts[0];
+    const port = Number(parts[1] || 0);
+    if (!ip) return;
+    netJoin({
+      id: ip + ":" + port,
+      name: ip,
+      addr: { id: ip, ip: ip, port: port }
+    });
+  }
+
+  function netWire() {
+    if (elements.netHost) elements.netHost.addEventListener("click", netHost);
+    if (elements.netRefresh) elements.netRefresh.addEventListener("click", netScan);
+    if (elements.netLeave) elements.netLeave.addEventListener("click", netLeave);
+    if (elements.netResign) elements.netResign.addEventListener("click", netResign);
+    if (elements.netManualJoin) elements.netManualJoin.addEventListener("click", netManualJoin);
+    if (elements.netNewGame) {
+      elements.netNewGame.addEventListener("click", () => resetGame());
+    }
+  }
+
+  async function netInit() {
+    netWire();
+    if (!Net) {
+      state.net.available = false;
+      netRender();
+      return;
+    }
+    Net.onStatus((status) => {
+      state.net.phase = status.phase;
+      state.net.mode = status.mode;
+      if (status.phase === "error") netLog("通道错误：" + defaultTo(status.error, "unknown"));
+      if (status.phase === "connected") {
+        netLog("数据通道已建立");
+        if (state.net.role === "guest" && !state.net.active) {
+          netSend({ t: "hello", name: netPlayerName });
+        }
+      }
+      if (status.phase === "announcing" && state.net.active) {
+        state.net.active = false;
+        netLog("与对手的连接已断开");
+      }
+      netRender();
+    });
+    Net.onMessage(netHandleMessage);
+    const status = await Net.ready();
+    state.net.available = !!status.available;
+    state.net.mode = status.mode;
+    if (state.net.available) {
+      netScan();
+      window.setInterval(() => {
+        if (state.net.inRoom) return;
+        netScan();
+      }, 2500);
+      window.setInterval(() => {
+        if (!netActive()) return;
+        netSend({ t: "ping", at: Date.now() });
+      }, 4000);
+    }
+    netRender();
+  }
 
   window.XiangqiLocal = {
     game: () => state.game,
@@ -3691,7 +4128,16 @@
     renderResultBanner,
     playSound,
     toggleSound,
-    reset: resetGame
+    reset: resetGame,
+    canMoveLocally,
+    netActive,
+    netHandleMessage,
+    netBegin,
+    netApplyMove,
+    netSend,
+    netLeave,
+    netApplySync,
+    netFinishByResign
   };
 
   document.documentElement.dataset.engineReady = "true";
@@ -3879,6 +4325,7 @@
   applyPieceColors(loadPieceColors());
   state.soundOn = loadSoundSetting();
   resetGame();
+  netInit();
   // Keep the clocks live. `setInterval` is optional so a headless harness that
   // only stubs setTimeout can still load this file.
   if (typeof window.setInterval === "function") {

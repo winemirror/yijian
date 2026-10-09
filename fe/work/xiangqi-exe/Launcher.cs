@@ -4,11 +4,13 @@ using System.Diagnostics;
 using System.IO;
 using Microsoft.Win32;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using System.Web.Script.Serialization;
 
 internal static class Launcher
 {
@@ -37,6 +39,7 @@ internal static class Launcher
             WriteResource(appRoot, "YiJian.styles.css", "styles.css");
             WriteResource(appRoot, "YiJian.ai-data.js", "ai-data.js");
             WriteResource(appRoot, "YiJian.app.js", "app.js");
+            WriteResource(appRoot, "YiJian.net.js", "net.js");
             WriteResource(appRoot, "YiJian.ai-worker-bootstrap.js", "ai-worker-bootstrap.js");
             WriteResource(appRoot, "YiJian.xiangqi-kai.woff2", "xiangqi-kai.woff2");
             Log(portableRoot, "resources written to " + appRoot);
@@ -49,6 +52,10 @@ internal static class Launcher
             int port = ((IPEndPoint)server.LocalEndpoint).Port;
             string url = string.Format("http://127.0.0.1:{0}/index.html?desktop=1", port);
             Log(portableRoot, "server: listening on 127.0.0.1:" + port);
+
+            // LAN discovery + signalling ride on UDP; the page reaches them
+            // through the /lan/* endpoints on the server above.
+            StartLanService(portableRoot);
 
             Thread serverThread = new Thread(delegate() { ServeLoop(server, appRoot); });
             serverThread.IsBackground = true;
@@ -93,6 +100,7 @@ internal static class Launcher
                 {
                     Diagnose(portableRoot, url);
                     keepServing = false;
+                    StopLanService();
                     try { server.Stop(); } catch { }
                     return;
                 }
@@ -100,6 +108,7 @@ internal static class Launcher
             }
 
             keepServing = false;
+            StopLanService();
             try { server.Stop(); } catch { }
             Log(portableRoot, "exit");
         }
@@ -153,24 +162,21 @@ internal static class Launcher
             using (client)
             using (NetworkStream stream = client.GetStream())
             {
-                string requestLine = ReadRequestLine(stream);
-                if (requestLine == null)
+                HttpRequest request = ReadRequest(stream);
+                if (request == null)
                 {
                     return;
                 }
 
-                string path = "/";
-                string[] parts = requestLine.Split(' ');
-                if (parts.Length >= 2)
+                // The multiplayer page reaches the LAN service over the same
+                // origin, so these endpoints need no CORS handling.
+                if (request.Path.StartsWith("/lan/", StringComparison.Ordinal))
                 {
-                    path = parts[1];
-                }
-                int query = path.IndexOf('?');
-                if (query >= 0)
-                {
-                    path = path.Substring(0, query);
+                    HandleLan(request, stream);
+                    return;
                 }
 
+                string path = request.Path;
                 string requestPath;
                 try
                 {
@@ -220,11 +226,23 @@ internal static class Launcher
         }
     }
 
-    private static string ReadRequestLine(NetworkStream stream)
+    private sealed class HttpRequest
+    {
+        public string Method = "GET";
+        public string Path = "/";
+        public string Query = string.Empty;
+        public Dictionary<string, string> Headers =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public byte[] Body = new byte[0];
+    }
+
+    // Minimal HTTP/1.1 request reader: request line, headers and an optional
+    // Content-Length body. That is everything the /lan/* endpoints need.
+    private static HttpRequest ReadRequest(NetworkStream stream)
     {
         List<byte> buffer = new List<byte>(1024);
         byte[] single = new byte[1];
-        while (buffer.Count < 8192)
+        while (buffer.Count < 65536)
         {
             int read = stream.Read(single, 0, 1);
             if (read <= 0)
@@ -246,9 +264,60 @@ internal static class Launcher
         {
             return null;
         }
-        string text = Encoding.ASCII.GetString(buffer.ToArray());
-        int end = text.IndexOf("\r\n", StringComparison.Ordinal);
-        return end > 0 ? text.Substring(0, end) : text;
+
+        string head = Encoding.UTF8.GetString(buffer.ToArray());
+        HttpRequest request = new HttpRequest();
+        string[] lines = head.Split(new string[] { "\r\n" }, StringSplitOptions.None);
+        string[] requestLine = lines[0].Split(' ');
+        if (requestLine.Length >= 1 && requestLine[0].Length > 0)
+        {
+            request.Method = requestLine[0].ToUpperInvariant();
+        }
+        string target = requestLine.Length >= 2 ? requestLine[1] : "/";
+        int query = target.IndexOf('?');
+        if (query >= 0)
+        {
+            request.Path = target.Substring(0, query);
+            request.Query = target.Substring(query + 1);
+        }
+        else
+        {
+            request.Path = target;
+        }
+
+        for (int index = 1; index < lines.Length; index += 1)
+        {
+            int colon = lines[index].IndexOf(':');
+            if (colon <= 0)
+            {
+                continue;
+            }
+            request.Headers[lines[index].Substring(0, colon).Trim()] =
+                lines[index].Substring(colon + 1).Trim();
+        }
+
+        int length = 0;
+        string contentLength;
+        if (request.Headers.TryGetValue("Content-Length", out contentLength))
+        {
+            int.TryParse(contentLength, out length);
+        }
+        if (length > 0 && length <= 1024 * 1024)
+        {
+            byte[] body = new byte[length];
+            int got = 0;
+            while (got < length)
+            {
+                int read = stream.Read(body, got, length - got);
+                if (read <= 0)
+                {
+                    break;
+                }
+                got += read;
+            }
+            request.Body = body;
+        }
+        return request;
     }
 
     private static string ContentTypeFor(string filePath)
@@ -431,6 +500,535 @@ internal static class Launcher
     {
         Log(portableRoot, "fail: " + message);
         MessageBox.Show(message, "弈鉴", MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+
+    // ------------------------------------------------------------- LAN service
+    //
+    // Minecraft-style LAN play without any game server: the launcher announces
+    // the room over UDP broadcast and ferries opaque signalling blobs between
+    // peers. It never looks inside a blob - WebRTC and the game protocol live
+    // entirely in the page (net.js / app.js).
+
+    private const int LanPort = 45455;
+    private const string LanAnnouncePrefix = "YJA\t";
+    private const string LanBlobPrefix = "YJS\t";
+    private static readonly TimeSpan LanRoomTtl = TimeSpan.FromSeconds(6);
+
+    private sealed class LanRoom
+    {
+        public string Id;
+        public string Name;
+        public string Ip;
+        public int Port;
+        public DateTime SeenAt;
+    }
+
+    private sealed class LanBlob
+    {
+        public string Ip;
+        public int Port;
+        public string Json;
+    }
+
+    private static readonly object lanLock = new object();
+    private static readonly Dictionary<string, LanRoom> lanRooms =
+        new Dictionary<string, LanRoom>(StringComparer.Ordinal);
+    private static readonly List<LanBlob> lanBlobs = new List<LanBlob>();
+    private static volatile UdpClient lanSocket;
+    private static volatile string lanAnnounceId;
+    private static volatile string lanAnnounceName = string.Empty;
+
+    private static void StartLanService(string portableRoot)
+    {
+        try
+        {
+            UdpClient socket = new UdpClient();
+            socket.ExclusiveAddressUse = false;
+            socket.Client.SetSocketOption(
+                SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true
+            );
+            socket.Client.Bind(new IPEndPoint(IPAddress.Any, LanPort));
+            socket.EnableBroadcast = true;
+            lanSocket = socket;
+
+            Thread receiver = new Thread(LanReceiveLoop);
+            receiver.IsBackground = true;
+            receiver.Start();
+
+            Thread announcer = new Thread(LanAnnounceLoop);
+            announcer.IsBackground = true;
+            announcer.Start();
+
+            Log(portableRoot, "lan: listening on udp " + LanPort);
+        }
+        catch (Exception error)
+        {
+            lanSocket = null;
+            Log(portableRoot, "lan: unavailable - " + error.Message);
+        }
+    }
+
+    private static void StopLanService()
+    {
+        UdpClient socket = lanSocket;
+        lanSocket = null;
+        if (socket != null)
+        {
+            try { socket.Close(); } catch { }
+        }
+    }
+
+    private static void LanReceiveLoop()
+    {
+        while (keepServing)
+        {
+            UdpClient socket = lanSocket;
+            if (socket == null)
+            {
+                return;
+            }
+            IPEndPoint remote = new IPEndPoint(IPAddress.Any, 0);
+            byte[] payload;
+            try
+            {
+                payload = socket.Receive(ref remote);
+            }
+            catch
+            {
+                // Socket closed on shutdown, or a malformed datagram.
+                if (!keepServing || lanSocket == null)
+                {
+                    return;
+                }
+                continue;
+            }
+
+            string text;
+            try { text = Encoding.UTF8.GetString(payload); }
+            catch { continue; }
+
+            if (text.StartsWith(LanAnnouncePrefix, StringComparison.Ordinal))
+            {
+                string[] parts = text.Split('\t');
+                if (parts.Length >= 3)
+                {
+                    // Ignore the echo of our own broadcast.
+                    if (parts[1] == lanAnnounceId)
+                    {
+                        continue;
+                    }
+                    LanRememberRoom(parts[1], parts[2], remote.Address.ToString(), LanPort);
+                }
+                continue;
+            }
+
+            if (text.StartsWith(LanBlobPrefix, StringComparison.Ordinal))
+            {
+                LanRememberBlob(
+                    remote.Address.ToString(),
+                    remote.Port,
+                    text.Substring(LanBlobPrefix.Length)
+                );
+            }
+        }
+    }
+
+    private static void LanRememberRoom(string id, string name, string ip, int port)
+    {
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+        lock (lanLock)
+        {
+            LanRoom room;
+            if (!lanRooms.TryGetValue(id, out room))
+            {
+                room = new LanRoom { Id = id };
+                lanRooms[id] = room;
+            }
+            room.Name = name;
+            room.Ip = ip;
+            room.Port = port;
+            room.SeenAt = DateTime.UtcNow;
+        }
+    }
+
+    private static void LanRememberBlob(string ip, int port, string json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            return;
+        }
+        lock (lanLock)
+        {
+            // A session produces a handful of blobs; the cap only guards
+            // against a runaway sender.
+            if (lanBlobs.Count >= 2000)
+            {
+                lanBlobs.RemoveRange(0, 1000);
+            }
+            lanBlobs.Add(new LanBlob { Ip = ip, Port = port, Json = json });
+        }
+    }
+
+    private static void LanAnnounceLoop()
+    {
+        while (keepServing)
+        {
+            UdpClient socket = lanSocket;
+            string id = lanAnnounceId;
+            if (socket != null && !string.IsNullOrEmpty(id))
+            {
+                byte[] payload = Encoding.UTF8.GetBytes(
+                    LanAnnouncePrefix + id + "\t" + (lanAnnounceName ?? string.Empty)
+                );
+                foreach (IPAddress target in LanBroadcastAddresses())
+                {
+                    try
+                    {
+                        socket.Send(payload, payload.Length, new IPEndPoint(target, LanPort));
+                    }
+                    catch
+                    {
+                        // Some adapters reject broadcast; the others still carry it.
+                    }
+                }
+            }
+            Thread.Sleep(1500);
+        }
+    }
+
+    private static List<IPAddress> LanBroadcastAddresses()
+    {
+        List<IPAddress> targets = new List<IPAddress>();
+        try
+        {
+            foreach (NetworkInterface adapter in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (adapter.OperationalStatus != OperationalStatus.Up)
+                {
+                    continue;
+                }
+                if (adapter.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                {
+                    continue;
+                }
+                foreach (UnicastIPAddressInformation info in adapter.GetIPProperties().UnicastAddresses)
+                {
+                    if (info.Address.AddressFamily != AddressFamily.InterNetwork)
+                    {
+                        continue;
+                    }
+                    IPAddress mask = info.IPv4Mask;
+                    if (mask == null)
+                    {
+                        continue;
+                    }
+                    byte[] address = info.Address.GetAddressBytes();
+                    byte[] maskBytes = mask.GetAddressBytes();
+                    if (address.Length != 4 || maskBytes.Length != 4)
+                    {
+                        continue;
+                    }
+                    byte[] broadcast = new byte[4];
+                    for (int index = 0; index < 4; index += 1)
+                    {
+                        broadcast[index] = (byte)(address[index] | (maskBytes[index] ^ 255));
+                    }
+                    targets.Add(new IPAddress(broadcast));
+                }
+            }
+        }
+        catch
+        {
+            // Fall through to the limited broadcast address.
+        }
+        if (targets.Count == 0)
+        {
+            targets.Add(IPAddress.Broadcast);
+        }
+        return targets;
+    }
+
+    private static void LanSend(string ip, int port, string json)
+    {
+        UdpClient socket = lanSocket;
+        IPAddress address;
+        if (socket == null || string.IsNullOrEmpty(json))
+        {
+            return;
+        }
+        if (!IPAddress.TryParse(ip, out address))
+        {
+            return;
+        }
+        byte[] payload = Encoding.UTF8.GetBytes(LanBlobPrefix + json);
+        try
+        {
+            socket.Send(payload, payload.Length, new IPEndPoint(address, port > 0 ? port : LanPort));
+        }
+        catch
+        {
+            // Peer went away between discovery and send.
+        }
+    }
+
+    private static string LanRoomsJson()
+    {
+        StringBuilder builder = new StringBuilder();
+        builder.Append("{\"rooms\":[");
+        DateTime now = DateTime.UtcNow;
+        lock (lanLock)
+        {
+            List<string> stale = new List<string>();
+            bool first = true;
+            foreach (KeyValuePair<string, LanRoom> entry in lanRooms)
+            {
+                LanRoom room = entry.Value;
+                if (now - room.SeenAt > LanRoomTtl)
+                {
+                    stale.Add(entry.Key);
+                    continue;
+                }
+                if (!first)
+                {
+                    builder.Append(',');
+                }
+                first = false;
+                builder.Append("{\"id\":\"").Append(JsonEscape(room.Id))
+                    .Append("\",\"name\":\"").Append(JsonEscape(room.Name))
+                    .Append("\",\"ip\":\"").Append(JsonEscape(room.Ip))
+                    .Append("\",\"port\":").Append(room.Port)
+                    .Append(",\"lastSeen\":")
+                    .Append((long)(now - room.SeenAt).TotalMilliseconds)
+                    .Append('}');
+            }
+            foreach (string key in stale)
+            {
+                lanRooms.Remove(key);
+            }
+        }
+        builder.Append("]}");
+        return builder.ToString();
+    }
+
+    private static string LanInboxJson(int since, int waitMs)
+    {
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(waitMs);
+        while (true)
+        {
+            lock (lanLock)
+            {
+                int count = lanBlobs.Count;
+                if (count > since || waitMs <= 0 || DateTime.UtcNow >= deadline)
+                {
+                    int from = Math.Max(0, Math.Min(since, count));
+                    StringBuilder builder = new StringBuilder();
+                    builder.Append("{\"cursor\":").Append(count).Append(",\"blobs\":[");
+                    for (int index = from; index < count; index += 1)
+                    {
+                        if (index > from)
+                        {
+                            builder.Append(',');
+                        }
+                        LanBlob blob = lanBlobs[index];
+                        builder.Append("{\"ip\":\"").Append(JsonEscape(blob.Ip))
+                            .Append("\",\"port\":").Append(blob.Port)
+                            .Append(",\"data\":").Append(blob.Json)
+                            .Append('}');
+                    }
+                    builder.Append("]}");
+                    return builder.ToString();
+                }
+            }
+            Thread.Sleep(40);
+        }
+    }
+
+    private static void HandleLan(HttpRequest request, NetworkStream stream)
+    {
+        string path = request.Path;
+        if (path == "/lan/hello")
+        {
+            WriteJson(
+                stream,
+                "{\"ok\":true,\"proto\":1,\"name\":\"YiJian\",\"platform\":\"windows\""
+                    + ",\"udp\":" + LanPort + ",\"active\":" + (lanSocket != null ? "true" : "false")
+                    + "}"
+            );
+            return;
+        }
+        if (path == "/lan/rooms")
+        {
+            WriteJson(stream, LanRoomsJson());
+            return;
+        }
+        if (path == "/lan/announce" && request.Method == "POST")
+        {
+            Dictionary<string, object> body = ParseJson(request.Body);
+            bool stop = body != null && body.ContainsKey("stop")
+                && Convert.ToBoolean(body["stop"]);
+            if (stop)
+            {
+                lanAnnounceId = null;
+            }
+            else
+            {
+                Dictionary<string, object> room = body != null && body.ContainsKey("room")
+                    ? body["room"] as Dictionary<string, object>
+                    : null;
+                if (room != null)
+                {
+                    lanAnnounceName = Str(room, "name");
+                    lanAnnounceId = Str(room, "id");
+                }
+            }
+            WriteJson(stream, "{\"ok\":true}");
+            return;
+        }
+        if (path == "/lan/send" && request.Method == "POST")
+        {
+            Dictionary<string, object> body = ParseJson(request.Body);
+            if (body != null)
+            {
+                object data = body.ContainsKey("data") ? body["data"] : null;
+                string json = data as string;
+                if (json == null && data != null)
+                {
+                    json = new JavaScriptSerializer().Serialize(data);
+                }
+                LanSend(Str(body, "ip"), ToInt(body, "port"), json);
+            }
+            WriteJson(stream, "{\"ok\":true}");
+            return;
+        }
+        if (path == "/lan/inbox")
+        {
+            int since = QueryInt(request.Query, "since", 0);
+            int wait = QueryInt(request.Query, "wait", 0);
+            if (wait < 0) wait = 0;
+            if (wait > 30000) wait = 30000;
+            WriteJson(stream, LanInboxJson(since, wait));
+            return;
+        }
+        WriteResponse(
+            stream,
+            404,
+            "text/plain; charset=utf-8",
+            Encoding.UTF8.GetBytes("Not found")
+        );
+    }
+
+    private static void WriteJson(NetworkStream stream, string json)
+    {
+        WriteResponse(
+            stream,
+            200,
+            "application/json; charset=utf-8",
+            Encoding.UTF8.GetBytes(json)
+        );
+    }
+
+    private static Dictionary<string, object> ParseJson(byte[] body)
+    {
+        if (body == null || body.Length == 0)
+        {
+            return null;
+        }
+        try
+        {
+            JavaScriptSerializer serializer = new JavaScriptSerializer();
+            serializer.MaxJsonLength = 8 * 1024 * 1024;
+            return serializer.Deserialize<Dictionary<string, object>>(
+                Encoding.UTF8.GetString(body)
+            );
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string Str(Dictionary<string, object> dict, string key)
+    {
+        if (dict == null || !dict.ContainsKey(key))
+        {
+            return string.Empty;
+        }
+        object value = dict[key];
+        return value == null ? string.Empty : Convert.ToString(value);
+    }
+
+    private static int ToInt(Dictionary<string, object> dict, string key)
+    {
+        if (dict == null || !dict.ContainsKey(key))
+        {
+            return 0;
+        }
+        try
+        {
+            return Convert.ToInt32(dict[key]);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static int QueryInt(string query, string key, int fallback)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return fallback;
+        }
+        string[] pairs = query.Split('&');
+        foreach (string pair in pairs)
+        {
+            int equals = pair.IndexOf('=');
+            string name = equals >= 0 ? pair.Substring(0, equals) : pair;
+            if (!string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            int value;
+            if (equals >= 0 && int.TryParse(pair.Substring(equals + 1), out value))
+            {
+                return value;
+            }
+        }
+        return fallback;
+    }
+
+    private static string JsonEscape(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+        StringBuilder builder = new StringBuilder(text.Length + 8);
+        foreach (char letter in text)
+        {
+            switch (letter)
+            {
+                case '"': builder.Append("\\\""); break;
+                case '\\': builder.Append("\\\\"); break;
+                case '\n': builder.Append("\\n"); break;
+                case '\r': builder.Append("\\r"); break;
+                case '\t': builder.Append("\\t"); break;
+                default:
+                    if (letter < ' ')
+                    {
+                        builder.Append("\\u").Append(((int)letter).ToString("x4"));
+                    }
+                    else
+                    {
+                        builder.Append(letter);
+                    }
+                    break;
+            }
+        }
+        return builder.ToString();
     }
 
     // Small startup log so a failed launch can be diagnosed from disk.

@@ -1,70 +1,79 @@
-﻿弈鉴 · 1.14 构建信息
+﻿弈鉴 · 2.0 构建信息
 
 包名: com.yijian.xiangqi
-版本: 1.14 (versionCode 15)
+版本: 2.0 (versionCode 16)
 最低 Android: 7.0 (API 24)
 目标 Android: 16 (API 36)
 构建类型: Debug APK
-签名: Android Debug，与 1.5 ~ 1.13 同一密钥
+签名: Android Debug，与 1.5 ~ 1.14 同一密钥
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581
 签名方案: APK Signature Scheme v2
 
-APK 文件: Yijian-Xiangqi-1.14.apk
+APK 文件: Yijian-Xiangqi-2.0.apk
+文件大小: 4336241 bytes
+SHA-256: AA9982578FE1267218985C8AC44C5E0F937B42D7F7888666789A175B29A153B5
+
+上一版: Yijian-Xiangqi-1.14.apk
 文件大小: 4325219 bytes
 SHA-256: F15DC5DEB77CF0F3410687783B0BD0294E5E3DA41DBAB4707469DB7C57B9A8B2
 
-上一版: Yijian-Xiangqi-1.13.apk
-文件大小: 4322611 bytes
-SHA-256: 35CBF4D85EA4C0D337C79FBA2462EE13B34590CD779580D6153454EC588A8E7A
+本次改动: 局域网联机（房间发现 + 信令 + 对局同步），版本号升到 2.0
 
-本次改动: 老系统兼容性（Windows A/B/C，Android P0/P1/P2）
+架构（三层，原生只做最笨的活）:
+  Web 层 (app.js + net.js)        协议、会话、WebRTC、界面
+  能力桥                           只有 4 个动作: announce / rooms / send / onBlob
+  原生层                            UDP 广播发现 + UDP 单播透传
 
-Windows 桌面版:
-  A. 浏览器兜底链
-     Edge（4 个安装位置 + 注册表 App Paths\msedge.exe）
-     → Chrome → Brave → Vivaldi → Opera → 360 → QQ 浏览器
-     → 系统默认浏览器（ShellExecute，普通标签页打开）
-     精简版 Windows 没有 Edge 时不再直接失败。
-  B. 工作目录兜底
-     先试 exe 同级目录，不可写（Program Files、只读共享、被杀软隔离的下载目录）时
-     自动改用 %LOCALAPPDATA%\YiJian，日志与资源页面都写在那里。
-  C. 诊断
-     一个浏览器都找不到时，弹窗给出可复制的本地地址，同时把地址放进剪贴板，
-     并写入 YiJian-data\launcher.log。
-  说明: 首次打开"无法访问"的两个根因（HTTP.sys URL 预留在首启未就绪、只读目录写不进
-        资源）都已消除。服务仍是 127.0.0.1 随机端口，no-store，正确的 MIME 类型。
-        退出判定只看本次启动的那个浏览器进程，不会被用户已经开着的其它浏览器拖住。
+新增文件:
+  www/net.js   传输层。原生桥 / 同源 HTTP 桥 / BroadcastChannel 三种实现，按可用性自动选择
+               并逐级降级；不可用时联机入口自动隐藏，单机完全不受影响。
 
-Android 版:
-  P0. index.html 顶部加入纯 ES5 兼容守卫
-      内核过旧时显示"浏览器版本过低"提示卡（并隐藏主界面），不再白屏；
-      另附 <noscript> 提示。守卫脚本自身就是 ES5，能被它要提醒的最老内核执行。
-  P1. CSS 兜底
-      aspect-ratio → padding-top:111.1111% 占位（9:10 棋盘）
-      inset:0 → top/right/bottom/left 四边
-      place-items → flex 居中
-      clamp() → 前一行写固定值，clamp 只作渐进增强
-  P2. 现代语法清理
-      移除全部 ?. / ?? / Array.prototype.at / Element.replaceChildren；
-      flex 容器的 gap 改为子元素外边距（所有内核都认），
-      grid 容器同时保留 grid-gap（Chrome 57-83 走别名，现代内核走 gap）。
-  实测: app.js 最低解析等级 ES2017（Chrome 55），守卫脚本 ES5；
-        Android 7（WebView 51-55）即可解析，更老的内核由 P0 守卫给出提示。
+Windows 端 (Launcher.cs):
+  - UDP 45455 广播房间：按每张网卡算出子网广播地址（并保留有限广播兜底），
+    包体为 "YJA\t房间id\t房间名"，1.5 秒一次
+  - 收到别人的广播就登记房间（6 秒未刷新即过期）；收到 "YJS\t<json>" 数据包就投递给页面
+  - 页面通过同源端点使用（无需 CORS）：
+      GET  /lan/hello      能力探测（版本、UDP 端口、服务是否启用）
+      POST /lan/announce   开始/停止广播房间
+      GET  /lan/rooms      当前发现的房间列表
+      POST /lan/send       把一段不透明数据发给某台设备
+      GET  /lan/inbox      长轮询取回收到的数据
+  - 原生层完全不解析信令内容，WebRTC 协商全部在页面里完成
+  - HTTP 请求解析升级为支持 POST 与 Content-Length 请求体（原来只支持 GET）
+
+Web 端:
+  - 侧栏新增“联机”页：创建房间（房间名 / 我方执棋 红·黑·随机）、局域网房间列表、
+    手动地址加入、连接状态与对手信息、认输 / 重开 / 离开，以及房间日志
+  - 顶栏状态区新增联机徽标：等待对手 / 执红·执黑 / 延迟
+  - 聊天在联机时改为真实收发，离线仍然是本地模拟
+  - 协议 v1：hello / welcome / move / chat / undoReq·undoOk·undoNo / resign /
+    newGame / syncReq / sync / ping / pong。状态类消息都带 ply，对不上就请求全量快照对齐
+  - 悔棋改为双方确认后才生效；认输与重开由发起方广播
+  - 无联机层时入口自动隐藏，单机流程一行未改
+
+降级顺序: 原生桥 -> 同源 HTTP /lan/* -> BroadcastChannel（同机多窗口，开发与验收用）-> 隐藏
 
 其余文件:
-  YiJian-Xiangqi.exe / YiJian-Xiangqi-Portable.exe   桌面版（同一套前端）
-  xiangqi-local/                                     可直接打开的离线网页
-  source/{index.html,styles.css,app.js,ai-data.js}   本次改动的源文件（可覆盖回工程）
-  sfx/                                               音效试听页、候选 MP3 与来源说明
+  YiJian-Xiangqi.exe / YiJian-Xiangqi-Portable.exe   桌面版（含局域网服务）
+  xiangqi-local/                                     可直接打开的离线网页（不含联机）
+  source/{index.html,styles.css,app.js,net.js,...}   本次改动的源文件
+  sfx/                                               音效试听页与素材
 
 验证:
-  verify-styles.mjs / verify-motion.mjs / verify-mate.mjs / verify-compat.mjs 全部通过
+  verify-styles / verify-motion / verify-mate / verify-compat / verify-net 全部通过
+  verify-net：两个独立的 net.js 实例经真实 BroadcastChannel 完成 房间发现 -> offer/answer
+    -> 通道打开 -> 消息互通；app.js 侧校验座位分配、错回合拒收、步数不一致请求对齐、
+    对手走子落地、聊天、认输、快照对齐、离开
   perft(3) = 79666（走子生成未变）
-  APK 内 assets/public 的文件哈希与 www/ 完全一致；
-  apksigner 证书 SHA-256 = 33C29CFD...（与 1.5 相同），versionCode 15 / 1.14
-  桌面版实机运行日志确认: 资源写入 → 本地服务 → 探测 200 → 识别 Edge → 启动 → 交接 → 干净退出
-  浏览器内实测: 桌面 1280 宽与移动 390 宽均无控制台错误，布局正常
+  APK 内 assets/public 与 www/ 逐文件哈希一致；apksigner 证书 SHA-256 = 33C29CFD...
+  桌面版实测：/lan/hello、/lan/rooms、/lan/announce、/lan/send -> /lan/inbox 端到端跑通
+    （数据经 UDP 回环返回，data 字段保持原始 JSON 对象）
 
-说明: 基于 w-2 工程 09:21 的状态继续叠加（移动端 meta / 触控优化、扁平棋子、拖影与虚线、
-计时器、11 种杀法判定、音效、胜负横幅）。本会话对 w-2 目录只有读权限，改动落在 fe\work
-工作副本，产物输出到 fe\outputs。
+已知限制:
+  - Android 端本次没有加 Kotlin 插件；net.js 在安卓上探测不到 YiJianNative.lan 就会
+    隐藏联机入口，所以 2.0 的联机目前只在 Windows 桌面版可用。插件按同样 4 个动作实现即可接入
+  - 局域网 UDP 广播首次运行需要放行 Windows 防火墙；路由器开了 AP 隔离或屏蔽广播时发现会失败
+  - 联机需要两台设备都运行 2.0
+
+说明: 基于 1.14 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
+产物输出到 fe\outputs。
