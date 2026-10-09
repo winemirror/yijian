@@ -220,15 +220,38 @@
   }
 
   // The bridge may inject Capacitor slightly after our script runs.
-  function waitForCapacitorPlugin(capacitor, attempts) {
-    var wrapped = capacitorLan(capacitor);
-    if (wrapped) return Promise.resolve(nativeTransport(wrapped));
-    if (attempts <= 0) return Promise.resolve(null);
+  function retryCapacitor(capacitor, attempts) {
     return new Promise(function (resolve) {
       scope.setTimeout(function () {
         resolve(waitForCapacitorPlugin(capacitor, attempts - 1));
       }, 100);
     });
+  }
+
+  function waitForCapacitorPlugin(capacitor, attempts) {
+    var wrapped = capacitorLan(capacitor);
+    if (!wrapped) {
+      if (attempts <= 0) return Promise.resolve(null);
+      return retryCapacitor(capacitor, attempts);
+    }
+    // Capacitor hands out a proxy even when the native side is missing, so ask
+    // the plugin something cheap before trusting it.
+    var probe = null;
+    try {
+      probe = capacitor.Plugins.YiJianLan.status();
+    } catch (error) {
+      probe = null;
+    }
+    if (!probe || typeof probe.then !== "function") {
+      return Promise.resolve(nativeTransport(wrapped));
+    }
+    return Promise.resolve(probe).then(
+      function () { return nativeTransport(wrapped); },
+      function () {
+        if (attempts <= 0) return nativeTransport(wrapped);
+        return retryCapacitor(capacitor, attempts);
+      }
+    );
   }
 
   function chooseTransport() {
@@ -265,6 +288,23 @@
     }
   }
 
+  // Transports report rooms in slightly different shapes: the tab transport
+  // hands over an `addr` object, while the native/http bridges flatten it into
+  // ip/port. Normalise here so joinRoom always has something to dial.
+  function normalizeRooms(list) {
+    var out = [];
+    var items = list || [];
+    for (var index = 0; index < items.length; index += 1) {
+      var room = items[index] || {};
+      var addr = room.addr;
+      if (!addr || addr.ip === undefined) {
+        addr = { id: room.id, ip: room.ip, port: room.port };
+      }
+      out.push({ id: room.id, name: room.name, ip: addr.ip, port: addr.port, addr: addr });
+    }
+    return out;
+  }
+
   function status() {
     return {
       available: !!state.transport,
@@ -284,6 +324,20 @@
     state.phase = "error";
     state.error = message || "";
     pushStatus();
+  }
+
+  // Errors that cross a promise chain lose their shape; keep name, message and
+  // the first stack frame so the in-app log actually points somewhere.
+  function describe(error) {
+    if (error === null || error === undefined) return "unknown";
+    if (typeof error === "string") return error;
+    var text = error.name ? error.name + ": " : "";
+    text += error.message || String(error);
+    if (error.stack) {
+      var first = String(error.stack).split("\n")[0];
+      if (first && text.indexOf(first) < 0) text += " | " + first;
+    }
+    return text;
   }
 
   // ------------------------------------------------------------ WebRTC plumbing
@@ -312,7 +366,9 @@
       if (connection.connectionState === "failed"
         || connection.connectionState === "disconnected") {
         state.peer = null;
-        state.phase = state.room ? "announcing" : "idle";
+        state.phase = state.room && state.room.role === "host"
+          ? "announcing"
+          : (state.room ? "connecting" : "idle");
         pushStatus();
       }
     };
@@ -350,6 +406,10 @@
     if (!blob || !blob.t) return;
 
     if (blob.t === "offer" && state.room && state.room.role === "host") {
+      if (!blob.sdp) {
+        fail("offer 缺少 sdp（数据可能在传输中损坏）");
+        return;
+      }
       state.peer = { addr: addr, name: blob.name || "" };
       state.phase = "connecting";
       pushStatus();
@@ -364,13 +424,17 @@
             t: "answer", sdp: pc.localDescription.sdp, name: state.room.name
           });
         })
-        .catch(function (error) { fail(String(error && error.message || error)); });
+        .catch(function (error) { fail(describe(error)); });
       return;
     }
 
     if (blob.t === "answer" && pc && state.room && state.room.role === "guest") {
+      if (!blob.sdp) {
+        fail("answer 缺少 sdp（数据可能在传输中损坏）");
+        return;
+      }
       pc.setRemoteDescription({ type: "answer", sdp: blob.sdp })
-        .catch(function (error) { fail(String(error && error.message || error)); });
+        .catch(function (error) { fail(describe(error)); });
       return;
     }
 
@@ -440,7 +504,7 @@
       return api.ready().then(function () {
         if (!state.transport) return [];
         return Promise.resolve(state.transport.rooms())
-          .then(function (list) { return list || []; })
+          .then(function (list) { return normalizeRooms(list); })
           .catch(function () { return []; });
       });
     },
@@ -506,7 +570,7 @@
             return status();
           })
           .catch(function (error) {
-            fail(String(error && error.message || error));
+            fail(describe(error));
             return status();
           });
       });

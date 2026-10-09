@@ -196,6 +196,7 @@ try {
       return Promise.resolve({ ok: true });
     },
     rooms() {
+      // Flat shape, exactly what the Android plugin and /lan/rooms return.
       return Promise.resolve({
         rooms: [{ id: "r1", name: "棋局C", ip: "10.0.0.9", port: 45455 }],
       });
@@ -208,8 +209,12 @@ try {
       calls.push(["send", payload]);
       return Promise.resolve({ ok: true });
     },
+    status() {
+      return Promise.resolve({ ok: true, proto: 1 });
+    },
   };
-  const net = loadNet(null, "capacitor", {
+  const webRTC = makeFakeWebRTC();
+  const net = loadNet(webRTC, "capacitor", {
     Capacitor: { Plugins: { YiJianLan: plugin } },
   });
   const status = await net.ready();
@@ -218,6 +223,21 @@ try {
   const rooms = await net.scan();
   check("rooms are read through the plugin", rooms.length === 1 && rooms[0].name === "棋局C",
     JSON.stringify(rooms));
+  check("a discovered room always exposes a dialable address",
+    !!(rooms[0] && rooms[0].addr
+      && rooms[0].addr.ip === "10.0.0.9" && rooms[0].addr.port === 45455),
+    JSON.stringify(rooms[0] && rooms[0].addr));
+
+  await net.joinRoom(rooms[0], { player: "甲" });
+  await tick(30);
+  const offers = calls.filter((entry) => entry[0] === "send").map((entry) => entry[1]);
+  const offer = offers.find((entry) => entry.data && entry.data.t === "offer");
+  check("joining dials the discovered address",
+    !!offer && offer.ip === "10.0.0.9" && offer.port === 45455
+      && offer.data.sdp === "sdp-offer",
+    JSON.stringify(offers));
+
+  net.leave();
   await net.hostRoom({ id: "room-c", name: "棋局C" });
   await tick(20);
   check("hosting announces through the plugin",

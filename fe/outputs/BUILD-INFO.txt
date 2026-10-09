@@ -1,64 +1,59 @@
-﻿弈鉴 · 2.1 构建信息
+﻿弈鉴 · 2.2 构建信息
 
 包名: com.yijian.xiangqi
-版本: 2.1 (versionCode 17)
+版本: 2.2 (versionCode 18)
 最低 Android: 7.0 (API 24)
 目标 Android: 16 (API 36)
 构建类型: Debug APK
-签名: Android Debug，与 1.5 ~ 2.0 同一密钥
+签名: Android Debug，与 1.5 ~ 2.1 同一密钥
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581
 签名方案: APK Signature Scheme v2
 
-APK 文件: Yijian-Xiangqi-2.1.apk
+APK 文件: Yijian-Xiangqi-2.2.apk
+文件大小: 4344357 bytes
+SHA-256: AAB5BE86B0FCCF419050774C2DEE194E07DD218ABC5EC4BDB6D8B3550BA6E6AE
+
+上一版: Yijian-Xiangqi-2.1.apk
 文件大小: 4343441 bytes
 SHA-256: 84014FB6FDF719703C632C8295691F4254A716D6F637DF353CCFAC5E7E9ECE18
 
-上一版: Yijian-Xiangqi-2.0.apk
-文件大小: 4336241 bytes
-SHA-256: AA9982578FE1267218985C8AC44C5E0F937B42D7F7888666789A175B29A153B5
+本次改动: 修复加入房间时报「通道错误：Cannot read properties of undefined」
 
-本次改动: 安卓端接入局域网联机（原生 UDP 插件），2.0 只在 Windows 可用的问题解决
+根因:
+  scan() 返回的房间是扁平结构 {id, name, ip, port}（安卓插件和桌面的 /lan/rooms 都
+  是这个形状），但 joinRoom() 读的是 target.addr。于是 state.transport.send(undefined, ...)
+  抛出 TypeError，被 catch 兜住后就显示成那句「通道错误」。
+  这个 bug 桌面端同样存在，只是先在安卓上被碰到。
+  之前的测试没抓到，是因为测试里用的 BroadcastChannel 传输恰好自己构造了 addr 字段。
 
-安卓原生插件 (YiJianLanPlugin.java):
-  - 用 Java 写的 Capacitor 本地插件（工程没有 Kotlin Gradle 配置，Java 省一层）。
-    在 MainActivity.onCreate 里 registerPlugin(...) 注册。
-  - 与 Windows 版行为完全一致：UDP 45455 广播房间（"YJA\t房间id\t房间名"，1.5 秒一次，
-    按每张网卡的子网广播地址发送，并保留 255.255.255.255 兜底），
-    收到 "YJS\t<json>" 就交给页面；插件本身不解析信令内容。
-  - 对外 5 个方法：announce / rooms / send / inbox / status
-  - 收 Wi-Fi 广播需要 CHANGE_WIFI_MULTICAST_STATE 权限并持有 MulticastLock，
-    已在 AndroidManifest 中声明并在服务启动时获取。
-  - 会话结束时释放 socket 与 MulticastLock（handleOnDestroy）。
+修复:
+  - net.js 新增 normalizeRooms()：不论传输层给的是 addr 还是扁平的 ip/port，
+    scan() 一律返回带 addr 的房间对象（同时保留 ip/port 方便界面显示）。
+  - 顺手加固了几处:
+      * 错误信息改成描述式（名称 + 消息 + 首个栈帧），不再只剩半句 message
+      * offer / answer 缺少 sdp 时给出明确提示，而不是继续走进 WebRTC 里崩
+      * Capacitor 插件先调一次 status() 探活再采信（Capacitor 的插件代理
+        即使原生侧缺失也会存在，只看代理会有误判）
+      * 连接断开回退时按 host / guest 给出正确阶段
+      * app.js 的搜索房间 / 创建房间 / 加入房间都加了 try-catch，
+        失败写进「房间日志」而不是变成未捕获的异常
 
-Web 层 (net.js):
-  - 新增 Capacitor 插件适配：探测到 Capacitor.Plugins.YiJianLan 时包成与桌面原生桥
-    相同的接口，会话层完全不用区分外壳。
-  - 桥可能比脚本晚注入，所以加了最多 1 秒的重试；仍拿不到就退回下一级传输。
-
-传输优先级（两端统一）:
-  注入式原生桥 -> Capacitor 插件 -> 同源 HTTP /lan/*（桌面） -> BroadcastChannel（同机） -> 隐藏入口
-
-其余文件:
-  YiJian-Xiangqi.exe / YiJian-Xiangqi-Portable.exe   桌面版（含局域网服务）
-  xiangqi-local/                                     可直接打开的离线网页（不含联机）
-  source/{index.html,styles.css,app.js,net.js,...}   本次改动的源文件
-  sfx/                                               音效试听页与素材
+回归测试:
+  verify-net 新增一条：原生桥返回“扁平房间”时，scan() 之后必须带 addr，
+  且 joinRoom 必须把 offer 发到 10.0.0.9:45455。修复前这条是红的。
 
 验证:
   verify-styles / verify-motion / verify-mate / verify-compat / verify-net 全部通过
-  verify-net 新增一条：只给 net.js 一个 Capacitor.Plugins.YiJianLan，确认它被当作原生桥
-    选中，rooms 走插件读取、hostRoom 通过插件广播
   perft(3) = 79666（走子生成未变）
-  APK: versionCode 17 / versionName 2.1；证书 SHA-256 = 33C29CFD...；
-       assets/public 与 www/ 逐文件哈希一致；YiJianLanPlugin 已编入 classes6.dex；
-       aapt 确认 INTERNET 与 CHANGE_WIFI_MULTICAST_STATE 已声明
-  桌面版实测：/lan/hello、/lan/rooms、/lan/announce、/lan/send -> /lan/inbox 端到端跑通
+  APK: versionCode 18 / versionName 2.2；证书 SHA-256 = 33C29CFD...；
+       assets/public 与 www/ 逐文件哈希一致；
+       YiJianLanPlugin 仍在 classes*.dex 中
+  桌面版同时重建（net.js / app.js 有改动）
 
 已知限制:
-  - 安卓插件尚未在真机上跑过（本机没有安卓设备可用）；逻辑与 Windows 版同构，
-    但组播/广播在不同厂商 ROM 上的行为需要两台真机实测
+  - 仍需两台安卓真机实测一轮（这台机器没有安卓设备可用）
   - 局域网广播首次运行需要在 Windows 放行防火墙；路由器开了 AP 隔离或屏蔽广播时发现会失败
-  - 联机需要两台设备都运行 2.0 以上（2.0 桌面 / 2.1 安卓）
+  - 联机需要两台设备都运行 2.0 以上
 
-说明: 基于 2.0 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
+说明: 基于 2.1 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
 产物输出到 fe\outputs。
