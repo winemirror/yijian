@@ -224,6 +224,7 @@
           <div class="status-main">
             <span id="turnBadge" class="turn-badge">红方行棋</span>
             <span id="statusText" class="status-text">准备开始</span>
+            <span id="netBadge" class="net-badge" hidden></span>
           </div>
           <div class="game-meta">
             <div class="clocks">
@@ -240,6 +241,7 @@
           <button class="tab active" data-tab="analysis" type="button">分析</button>
           <button class="tab" data-tab="review" type="button">复盘</button>
           <button class="tab" data-tab="chat" type="button">聊天</button>
+          <button class="tab" data-tab="net" type="button">联机</button>
         </div>
 
         <section id="panel-analysis" class="panel active" aria-label="分析面板">
@@ -312,7 +314,7 @@
         </section>
 
         <section id="panel-chat" class="panel" aria-label="聊天面板">
-          <div class="local-note">本地模拟聊天 · 不连接网络</div>
+          <div id="chatNote" class="local-note">本地模拟聊天 · 不连接网络</div>
           <div id="chatLog" class="chat-log"></div>
           <div class="quick-chat">
             <button type="button" data-chat="好棋">好棋</button>
@@ -325,11 +327,66 @@
             <button class="btn primary small" type="submit">发送</button>
           </form>
         </section>
+
+        <section id="panel-net" class="panel" aria-label="联机面板">
+          <div id="netUnavailable" class="local-note" hidden>
+            当前环境没有可用的局域网通道，联机功能已关闭。
+          </div>
+
+          <div id="netIdle">
+            <div class="section-block">
+              <div class="section-head">
+                <h2>创建房间</h2>
+              </div>
+              <label class="field">
+                <span>房间名</span>
+                <input id="netRoomName" type="text" maxlength="20" value="我的棋局">
+              </label>
+              <label class="field">
+                <span>我方执棋</span>
+                <select id="netSide">
+                  <option value="red" selected>红方</option>
+                  <option value="black">黑方</option>
+                  <option value="random">随机</option>
+                </select>
+              </label>
+              <button id="netHost" class="btn primary" type="button">创建房间</button>
+            </div>
+
+            <div class="section-block">
+              <div class="section-head">
+                <h2>局域网房间</h2>
+                <button id="netRefresh" class="btn small" type="button">刷新</button>
+              </div>
+              <div id="netRooms" class="net-rooms">
+                <div class="empty-state">正在搜索局域网房间…</div>
+              </div>
+              <div class="net-manual">
+                <input id="netManual" type="text" placeholder="手动地址，如 192.168.1.5:45455">
+                <button id="netManualJoin" class="btn small" type="button">加入</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="netActive" hidden>
+            <div class="net-status">
+              <div id="netStatusText" class="net-status-text">未联机</div>
+              <div id="netDetail" class="net-detail"></div>
+            </div>
+            <div class="net-actions">
+              <button id="netResign" class="btn small" type="button">认输</button>
+              <button id="netNewGame" class="btn small" type="button">重开</button>
+              <button id="netLeave" class="btn small" type="button">离开房间</button>
+            </div>
+            <div id="netLog" class="net-log"></div>
+          </div>
+        </section>
       </aside>
     </main>
   </div>
 
   <script src="ai-data.js"></script>
+  <script src="net.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
