@@ -103,15 +103,16 @@ function makeFakeWebRTC() {
   return { PeerConnection: FakePeerConnection, all };
 }
 
-function loadNet(webRTC, label) {
+function loadNet(webRTC, label, extra) {
   const win = {
     BroadcastChannel,
-    RTCPeerConnection: webRTC.PeerConnection,
+    RTCPeerConnection: webRTC ? webRTC.PeerConnection : undefined,
     setTimeout,
     clearTimeout,
     setInterval,
     clearInterval,
     console,
+    ...(extra || {}),
   };
   win.window = win;
   win.self = win;
@@ -119,7 +120,7 @@ function loadNet(webRTC, label) {
     window: win,
     self: win,
     BroadcastChannel,
-    RTCPeerConnection: webRTC.PeerConnection,
+    RTCPeerConnection: webRTC ? webRTC.PeerConnection : undefined,
     setTimeout,
     clearTimeout,
     setInterval,
@@ -136,6 +137,7 @@ function loadNet(webRTC, label) {
     Boolean,
     Error,
     isNaN,
+    ...(extra || {}),
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
@@ -183,6 +185,48 @@ console.log("== net.js: native bridge wins ==");
   vm.runInContext(fs.readFileSync(NET_JS, "utf8"), sandbox, { filename: "native:net.js" });
   const status = await win.XiangqiNet.ready();
   check("prefers the shell bridge", status.mode === "native", status.mode);
+}
+
+console.log("== net.js: capacitor plugin bridge ==");
+try {
+  const calls = [];
+  const plugin = {
+    announce(payload) {
+      calls.push(["announce", payload]);
+      return Promise.resolve({ ok: true });
+    },
+    rooms() {
+      return Promise.resolve({
+        rooms: [{ id: "r1", name: "棋局C", ip: "10.0.0.9", port: 45455 }],
+      });
+    },
+    inbox(payload) {
+      calls.push(["inbox", payload]);
+      return Promise.resolve({ cursor: payload.since, blobs: [] });
+    },
+    send(payload) {
+      calls.push(["send", payload]);
+      return Promise.resolve({ ok: true });
+    },
+  };
+  const net = loadNet(null, "capacitor", {
+    Capacitor: { Plugins: { YiJianLan: plugin } },
+  });
+  const status = await net.ready();
+  check("uses the capacitor plugin as the native bridge", status.mode === "native",
+    status.mode);
+  const rooms = await net.scan();
+  check("rooms are read through the plugin", rooms.length === 1 && rooms[0].name === "棋局C",
+    JSON.stringify(rooms));
+  await net.hostRoom({ id: "room-c", name: "棋局C" });
+  await tick(20);
+  check("hosting announces through the plugin",
+    calls.some((entry) => entry[0] === "announce" && entry[1].room
+      && entry[1].room.id === "room-c"),
+    JSON.stringify(calls.map((entry) => entry[0])));
+  net.leave();
+} catch (error) {
+  check("capacitor bridge completed", false, String(error && error.message || error));
 }
 
 console.log("== net.js: two peers complete a handshake ==");

@@ -1,57 +1,42 @@
-﻿弈鉴 · 2.0 构建信息
+﻿弈鉴 · 2.1 构建信息
 
 包名: com.yijian.xiangqi
-版本: 2.0 (versionCode 16)
+版本: 2.1 (versionCode 17)
 最低 Android: 7.0 (API 24)
 目标 Android: 16 (API 36)
 构建类型: Debug APK
-签名: Android Debug，与 1.5 ~ 1.14 同一密钥
+签名: Android Debug，与 1.5 ~ 2.0 同一密钥
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581
 签名方案: APK Signature Scheme v2
 
-APK 文件: Yijian-Xiangqi-2.0.apk
+APK 文件: Yijian-Xiangqi-2.1.apk
+文件大小: 4343441 bytes
+SHA-256: 84014FB6FDF719703C632C8295691F4254A716D6F637DF353CCFAC5E7E9ECE18
+
+上一版: Yijian-Xiangqi-2.0.apk
 文件大小: 4336241 bytes
 SHA-256: AA9982578FE1267218985C8AC44C5E0F937B42D7F7888666789A175B29A153B5
 
-上一版: Yijian-Xiangqi-1.14.apk
-文件大小: 4325219 bytes
-SHA-256: F15DC5DEB77CF0F3410687783B0BD0294E5E3DA41DBAB4707469DB7C57B9A8B2
+本次改动: 安卓端接入局域网联机（原生 UDP 插件），2.0 只在 Windows 可用的问题解决
 
-本次改动: 局域网联机（房间发现 + 信令 + 对局同步），版本号升到 2.0
+安卓原生插件 (YiJianLanPlugin.java):
+  - 用 Java 写的 Capacitor 本地插件（工程没有 Kotlin Gradle 配置，Java 省一层）。
+    在 MainActivity.onCreate 里 registerPlugin(...) 注册。
+  - 与 Windows 版行为完全一致：UDP 45455 广播房间（"YJA\t房间id\t房间名"，1.5 秒一次，
+    按每张网卡的子网广播地址发送，并保留 255.255.255.255 兜底），
+    收到 "YJS\t<json>" 就交给页面；插件本身不解析信令内容。
+  - 对外 5 个方法：announce / rooms / send / inbox / status
+  - 收 Wi-Fi 广播需要 CHANGE_WIFI_MULTICAST_STATE 权限并持有 MulticastLock，
+    已在 AndroidManifest 中声明并在服务启动时获取。
+  - 会话结束时释放 socket 与 MulticastLock（handleOnDestroy）。
 
-架构（三层，原生只做最笨的活）:
-  Web 层 (app.js + net.js)        协议、会话、WebRTC、界面
-  能力桥                           只有 4 个动作: announce / rooms / send / onBlob
-  原生层                            UDP 广播发现 + UDP 单播透传
+Web 层 (net.js):
+  - 新增 Capacitor 插件适配：探测到 Capacitor.Plugins.YiJianLan 时包成与桌面原生桥
+    相同的接口，会话层完全不用区分外壳。
+  - 桥可能比脚本晚注入，所以加了最多 1 秒的重试；仍拿不到就退回下一级传输。
 
-新增文件:
-  www/net.js   传输层。原生桥 / 同源 HTTP 桥 / BroadcastChannel 三种实现，按可用性自动选择
-               并逐级降级；不可用时联机入口自动隐藏，单机完全不受影响。
-
-Windows 端 (Launcher.cs):
-  - UDP 45455 广播房间：按每张网卡算出子网广播地址（并保留有限广播兜底），
-    包体为 "YJA\t房间id\t房间名"，1.5 秒一次
-  - 收到别人的广播就登记房间（6 秒未刷新即过期）；收到 "YJS\t<json>" 数据包就投递给页面
-  - 页面通过同源端点使用（无需 CORS）：
-      GET  /lan/hello      能力探测（版本、UDP 端口、服务是否启用）
-      POST /lan/announce   开始/停止广播房间
-      GET  /lan/rooms      当前发现的房间列表
-      POST /lan/send       把一段不透明数据发给某台设备
-      GET  /lan/inbox      长轮询取回收到的数据
-  - 原生层完全不解析信令内容，WebRTC 协商全部在页面里完成
-  - HTTP 请求解析升级为支持 POST 与 Content-Length 请求体（原来只支持 GET）
-
-Web 端:
-  - 侧栏新增“联机”页：创建房间（房间名 / 我方执棋 红·黑·随机）、局域网房间列表、
-    手动地址加入、连接状态与对手信息、认输 / 重开 / 离开，以及房间日志
-  - 顶栏状态区新增联机徽标：等待对手 / 执红·执黑 / 延迟
-  - 聊天在联机时改为真实收发，离线仍然是本地模拟
-  - 协议 v1：hello / welcome / move / chat / undoReq·undoOk·undoNo / resign /
-    newGame / syncReq / sync / ping / pong。状态类消息都带 ply，对不上就请求全量快照对齐
-  - 悔棋改为双方确认后才生效；认输与重开由发起方广播
-  - 无联机层时入口自动隐藏，单机流程一行未改
-
-降级顺序: 原生桥 -> 同源 HTTP /lan/* -> BroadcastChannel（同机多窗口，开发与验收用）-> 隐藏
+传输优先级（两端统一）:
+  注入式原生桥 -> Capacitor 插件 -> 同源 HTTP /lan/*（桌面） -> BroadcastChannel（同机） -> 隐藏入口
 
 其余文件:
   YiJian-Xiangqi.exe / YiJian-Xiangqi-Portable.exe   桌面版（含局域网服务）
@@ -61,19 +46,19 @@ Web 端:
 
 验证:
   verify-styles / verify-motion / verify-mate / verify-compat / verify-net 全部通过
-  verify-net：两个独立的 net.js 实例经真实 BroadcastChannel 完成 房间发现 -> offer/answer
-    -> 通道打开 -> 消息互通；app.js 侧校验座位分配、错回合拒收、步数不一致请求对齐、
-    对手走子落地、聊天、认输、快照对齐、离开
+  verify-net 新增一条：只给 net.js 一个 Capacitor.Plugins.YiJianLan，确认它被当作原生桥
+    选中，rooms 走插件读取、hostRoom 通过插件广播
   perft(3) = 79666（走子生成未变）
-  APK 内 assets/public 与 www/ 逐文件哈希一致；apksigner 证书 SHA-256 = 33C29CFD...
+  APK: versionCode 17 / versionName 2.1；证书 SHA-256 = 33C29CFD...；
+       assets/public 与 www/ 逐文件哈希一致；YiJianLanPlugin 已编入 classes6.dex；
+       aapt 确认 INTERNET 与 CHANGE_WIFI_MULTICAST_STATE 已声明
   桌面版实测：/lan/hello、/lan/rooms、/lan/announce、/lan/send -> /lan/inbox 端到端跑通
-    （数据经 UDP 回环返回，data 字段保持原始 JSON 对象）
 
 已知限制:
-  - Android 端本次没有加 Kotlin 插件；net.js 在安卓上探测不到 YiJianNative.lan 就会
-    隐藏联机入口，所以 2.0 的联机目前只在 Windows 桌面版可用。插件按同样 4 个动作实现即可接入
-  - 局域网 UDP 广播首次运行需要放行 Windows 防火墙；路由器开了 AP 隔离或屏蔽广播时发现会失败
-  - 联机需要两台设备都运行 2.0
+  - 安卓插件尚未在真机上跑过（本机没有安卓设备可用）；逻辑与 Windows 版同构，
+    但组播/广播在不同厂商 ROM 上的行为需要两台真机实测
+  - 局域网广播首次运行需要在 Windows 放行防火墙；路由器开了 AP 隔离或屏蔽广播时发现会失败
+  - 联机需要两台设备都运行 2.0 以上（2.0 桌面 / 2.1 安卓）
 
-说明: 基于 1.14 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
+说明: 基于 2.0 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
 产物输出到 fe\outputs。

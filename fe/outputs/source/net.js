@@ -194,10 +194,47 @@
       .catch(function () { return null; });
   }
 
+  // Capacitor publishes plugins as Capacitor.Plugins.<Name>. Wrapping it here
+  // keeps the shell interface identical to the injected native bridge, so the
+  // session code never needs to know which shell it runs in.
+  function capacitorLan(capacitor) {
+    var plugin = capacitor && capacitor.Plugins && capacitor.Plugins.YiJianLan;
+    if (!plugin) return null;
+    return {
+      announce: function (room) { return plugin.announce({ room: room }); },
+      stopAnnounce: function () { return plugin.announce({ stop: true }); },
+      rooms: function () {
+        return Promise.resolve(plugin.rooms()).then(function (result) {
+          return (result && result.rooms) || [];
+        });
+      },
+      inbox: function (cursor) {
+        return Promise.resolve(plugin.inbox({ since: cursor })).then(function (result) {
+          return result || { cursor: cursor, blobs: [] };
+        });
+      },
+      send: function (ip, port, data) {
+        return plugin.send({ ip: ip, port: port, data: data });
+      }
+    };
+  }
+
+  // The bridge may inject Capacitor slightly after our script runs.
+  function waitForCapacitorPlugin(capacitor, attempts) {
+    var wrapped = capacitorLan(capacitor);
+    if (wrapped) return Promise.resolve(nativeTransport(wrapped));
+    if (attempts <= 0) return Promise.resolve(null);
+    return new Promise(function (resolve) {
+      scope.setTimeout(function () {
+        resolve(waitForCapacitorPlugin(capacitor, attempts - 1));
+      }, 100);
+    });
+  }
+
   function chooseTransport() {
     var bridge = scope.YiJianNative && scope.YiJianNative.lan;
     if (bridge) return Promise.resolve(nativeTransport(bridge));
-    if (scope.Capacitor) return Promise.resolve(null);
+    if (scope.Capacitor) return waitForCapacitorPlugin(scope.Capacitor, 10);
     return probeHttp().then(function (transport) {
       if (transport) return transport;
       if (typeof scope.BroadcastChannel === "function") return tabTransport();
