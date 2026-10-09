@@ -2539,9 +2539,19 @@
     return state.net.mySide === state.game.sideToMove;
   }
 
+  // Whether the local user may move right now. In a net game side ownership
+  // comes from the room, not from the single-player per-side selects - those
+  // still default to "red human / black AI" and used to block whoever joined.
+  function canPlayNow() {
+    if (netActive()) return canMoveLocally();
+    return state.control[state.game.sideToMove] === "human";
+  }
+
   // The per-side <select> encodes both ownership and AI strength:
   // "human" or "ai:<levelKey>".
   function parseSetup(value) {
+    // "玩家" is what the two selects show while a net room is active.
+    if (value === "player") return { control: "human", level: null };
     if (value === "human") return { control: "human", level: null };
     if (typeof value === "string" && value.startsWith("ai:")) {
       const level = value.slice(3);
@@ -2565,11 +2575,41 @@
     applySetup(BLACK, elements.blackSetup.value);
   }
 
+  // In a net room both sides are people, so the two per-side selects are pinned
+  // to "玩家" and locked. The single-player choice is restored on leaving.
+  let netSetupBackup = null;
+
+  function enterNetSetup() {
+    if (!netSetupBackup) {
+      netSetupBackup = {
+        red: elements.redSetup.value,
+        black: elements.blackSetup.value
+      };
+    }
+    elements.redSetup.value = "player";
+    elements.blackSetup.value = "player";
+    elements.redSetup.disabled = true;
+    elements.blackSetup.disabled = true;
+    applySetup(RED, "player");
+    applySetup(BLACK, "player");
+  }
+
+  function exitNetSetup() {
+    if (!netSetupBackup) return;
+    elements.redSetup.value = netSetupBackup.red;
+    elements.blackSetup.value = netSetupBackup.black;
+    elements.redSetup.disabled = false;
+    elements.blackSetup.disabled = false;
+    netSetupBackup = null;
+    readSetupFromControls();
+  }
+
   function levelFor(side) {
     return state.levels[side] || "medium";
   }
 
   function controlLabel(side) {
+    if (netActive()) return side === state.net.mySide ? "你" : "对手";
     return state.control[side] === "human" ? "你" : `AI · ${AI_LEVELS[levelFor(side)].label}`;
   }
 
@@ -2579,6 +2619,9 @@
 
   function actorLabel(side) {
     const color = side === RED ? "红方" : "黑方";
+    if (netActive()) {
+      return `${color} · ${side === state.net.mySide ? "你" : "对手"}`;
+    }
     return state.control[side] === "human" ? `${color} · 你` : `${color} · AI`;
   }
 
@@ -2925,8 +2968,12 @@
   }
 
   function renderLabels() {
-    elements.redSetup.value = setupValue(RED);
-    elements.blackSetup.value = setupValue(BLACK);
+    // While a room is open the two selects are managed by enter/exitNetSetup,
+    // so a plain render must not write the single-player values back into them.
+    if (!state.net.inRoom) {
+      elements.redSetup.value = setupValue(RED);
+      elements.blackSetup.value = setupValue(BLACK);
+    }
     elements.redLabel.textContent = controlLabel(RED);
     elements.blackLabel.textContent = controlLabel(BLACK);
   }
@@ -3059,6 +3106,10 @@
         setStatus(`复盘到第 ${state.reviewPly} 手`);
       } else if (state.busy) {
         setStatus("AI 正在计算");
+      } else if (netActive()) {
+        setStatus(canMoveLocally()
+          ? (state.selected === null ? "请选择棋子" : "请选择落点")
+          : "等待对手落子");
       } else if (state.control[playingSide] === "human") {
         setStatus(state.selected === null ? "请选择棋子" : "请选择落点");
       } else if (!state.playing) {
@@ -3360,6 +3411,9 @@
     const ghost = captureCapturedGhost(move.from, move.to);
     const record = state.game.play(move.from, move.to);
     markMoveTiming(record);
+    // "自动下一步" is available to the local player in a net game too, so the
+    // move it picks has to reach the other side.
+    if (netActive()) netSendMove(record);
     state.reviewPly = state.game.history.length;
     elements.thinking.hidden = true;
     const animationDuration = renderMove(record, ghost);
@@ -3387,16 +3441,16 @@
   }
 
   function updateAutoStepButton() {
-    const side = state.game.sideToMove;
     const usable = state.live
       && !state.busy
       && state.game.result.type === "ongoing"
-      && state.control[side] === "human";
+      && canPlayNow();
     elements.autoStep.disabled = !usable;
   }
 
   function updatePlayButton() {
-    const hasAI = state.control[RED] === "ai" || state.control[BLACK] === "ai";
+    const hasAI = !netActive()
+      && (state.control[RED] === "ai" || state.control[BLACK] === "ai");
     elements.playToggle.disabled = !hasAI;
     elements.playToggle.textContent = state.playing ? "\u23F8" : "\u25B6";
     elements.playToggle.classList.toggle("playing", state.playing);
@@ -3458,9 +3512,10 @@
   // is on the move, using that side's remembered AI strength.
   async function playAutoStep() {
     if (state.busy || !state.live || state.game.result.type !== "ongoing") return;
-    const side = state.game.sideToMove;
-    if (state.control[side] !== "human") {
-      setStatus("该方由 AI 执子");
+    if (!canPlayNow()) {
+      setStatus(state.control[state.game.sideToMove] === "ai" && !netActive()
+        ? "该方由 AI 执子"
+        : "还没轮到你");
       return;
     }
     allowAnimation = !prefersReducedMotion;
@@ -3580,8 +3635,7 @@
 
   function boardClick(event) {
     if (!state.live || state.busy || state.game.result.type !== "ongoing") return;
-    if (state.control[state.game.sideToMove] !== "human") return;
-    if (!canMoveLocally()) return;
+    if (!canPlayNow()) return;
     const pieceElement = event.target.closest(".piece");
     if (pieceElement) {
       const square = Number(pieceElement.dataset.square);
@@ -3769,6 +3823,7 @@
     state.net.peerName = peerName || "对手";
     state.net.phase = "connected";
     state.net.pendingUndo = false;
+    enterNetSetup();
     // Both sides start from a clean board, so the two copies line up.
     resetGame({ remote: true });
     appendChat("系统", `已连接，我方执${mySide === RED ? "红" : "黑"}`, false);
@@ -3988,6 +4043,7 @@
     state.net.mySide = side;
     state.net.peerSide = opposite(side);
     state.net.phase = "announcing";
+    enterNetSetup();
     try {
       await Net.hostRoom({
         name: defaultTo(elements.netRoomName && elements.netRoomName.value.trim(), "") || "我的棋局",
@@ -4009,6 +4065,7 @@
     state.net.mySide = null;
     state.net.peerSide = null;
     state.net.phase = "connecting";
+    enterNetSetup();
     netLog(`正在连接「${room.name || "房间"}」…`);
     netRender();
     try {
@@ -4023,6 +4080,7 @@
   function netLeave() {
     if (Net) Net.leave();
     if (state.net.inRoom) netLog("已离开房间");
+    exitNetSetup();
     state.net.active = false;
     state.net.inRoom = false;
     state.net.role = null;
@@ -4145,6 +4203,7 @@
     toggleSound,
     reset: resetGame,
     canMoveLocally,
+    canPlayNow,
     netActive,
     netHandleMessage,
     netBegin,
