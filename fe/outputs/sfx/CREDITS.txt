@@ -1,0 +1,31 @@
+弈鉴 · 棋子音效候选
+
+全部素材来自 Kenney（https://kenney.nl）的免费音效包：
+
+  Impact Sounds (1.0)      https://kenney.nl/assets/impact-sounds
+  Casino Audio             https://kenney.nl/assets/casino-audio
+
+授权: Creative Commons Zero, CC0 1.0 Universal
+      http://creativecommons.org/publicdomain/zero/1.0/
+      可自由用于个人、教育及商业项目；署名非必需（但欢迎保留来源信息）。
+
+候选文件与原始素材对应关系
+
+  执子 (pickup)
+    pickup-1.mp3   casino-audio  Audio/chips-handle-2.ogg
+    pickup-2.mp3   impact-sounds Audio/impactWood_light_000.ogg
+    pickup-3.mp3   casino-audio  Audio/chips-stack-1.ogg
+
+  落子 (place)
+    place-1.mp3    impact-sounds Audio/impactWood_medium_000.ogg
+    place-2.mp3    impact-sounds Audio/impactWood_medium_003.ogg
+    place-3.mp3    casino-audio  Audio/chip-lay-1.ogg
+    place-4.mp3    impact-sounds Audio/impactPlank_medium_001.ogg
+
+  吃子 (capture)
+    capture-1.mp3  impact-sounds Audio/impactWood_heavy_000.ogg
+    capture-2.mp3  impact-sounds Audio/impactWood_heavy_003.ogg
+    capture-3.mp3  casino-audio  Audio/chips-collide-2.ogg
+
+处理方式: ffmpeg 转为单声道 44.1kHz MP3，96kbps，未做增益或音高处理。
+原始 .ogg 文件与完整音效包保存在 work/sfx/packs/ 下，随时可重新导出。
