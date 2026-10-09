@@ -1,59 +1,60 @@
-﻿弈鉴 · 2.2 构建信息
+﻿弈鉴 · 2.3 构建信息
 
 包名: com.yijian.xiangqi
-版本: 2.2 (versionCode 18)
+版本: 2.3 (versionCode 19)
 最低 Android: 7.0 (API 24)
 目标 Android: 16 (API 36)
 构建类型: Debug APK
-签名: Android Debug，与 1.5 ~ 2.1 同一密钥
+签名: Android Debug，与 1.5 ~ 2.2 同一密钥
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581
 签名方案: APK Signature Scheme v2
 
-APK 文件: Yijian-Xiangqi-2.2.apk
+APK 文件: Yijian-Xiangqi-2.3.apk
+文件大小: 4345093 bytes
+SHA-256: F7331DEC6C5A0068AB1E1DADCD01236B3546CA4714A077AA8E421472173126F4
+
+上一版: Yijian-Xiangqi-2.2.apk
 文件大小: 4344357 bytes
 SHA-256: AAB5BE86B0FCCF419050774C2DEE194E07DD218ABC5EC4BDB6D8B3550BA6E6AE
 
-上一版: Yijian-Xiangqi-2.1.apk
-文件大小: 4343441 bytes
-SHA-256: 84014FB6FDF719703C632C8295691F4254A716D6F637DF353CCFAC5E7E9ECE18
-
-本次改动: 修复加入房间时报「通道错误：Cannot read properties of undefined」
+本次改动: 修复「联机只能下一步，轮到对手就走不动」
 
 根因:
-  scan() 返回的房间是扁平结构 {id, name, ip, port}（安卓插件和桌面的 /lan/rooms 都
-  是这个形状），但 joinRoom() 读的是 target.addr。于是 state.transport.send(undefined, ...)
-  抛出 TypeError，被 catch 兜住后就显示成那句「通道错误」。
-  这个 bug 桌面端同样存在，只是先在安卓上被碰到。
-  之前的测试没抓到，是因为测试里用的 BroadcastChannel 传输恰好自己构造了 addr 字段。
+  boardClick() 的第一道判定是 state.control[当前方] !== "human" 就返回，
+  而 state.control 在联机时仍然是单机那两个下拉的值（默认红方=我执子、黑方=AI）。
+  于是执黑加入的一方在轮到自己时被直接拦住，表现就是「红方走一手之后黑方点不动」。
 
 修复:
-  - net.js 新增 normalizeRooms()：不论传输层给的是 addr 还是扁平的 ip/port，
-    scan() 一律返回带 addr 的房间对象（同时保留 ip/port 方便界面显示）。
-  - 顺手加固了几处:
-      * 错误信息改成描述式（名称 + 消息 + 首个栈帧），不再只剩半句 message
-      * offer / answer 缺少 sdp 时给出明确提示，而不是继续走进 WebRTC 里崩
-      * Capacitor 插件先调一次 status() 探活再采信（Capacitor 的插件代理
-        即使原生侧缺失也会存在，只看代理会有误判）
-      * 连接断开回退时按 host / guest 给出正确阶段
-      * app.js 的搜索房间 / 创建房间 / 加入房间都加了 try-catch，
-        失败写进「房间日志」而不是变成未捕获的异常
+  - 新增 canPlayNow()：联机时只看房间分配的座位（是不是我的回合），
+    单机时才看那两下拉。boardClick / 自动下一步按钮 / 自动下一步都改用它。
+  - 顶栏两个下拉在联机时改写为「玩家」：进入房间时把红黑两边都置为
+    「玩家」并锁定，离开房间后恢复原来的选择。
+  - renderLabels() 原本每次 render 都会把下拉写回 setupValue()，
+    会把刚设好的「玩家」冲掉，已改为房间期间不接管这两个下拉。
+  - renderStatus 在联机时给出正确提示：轮到我「请选择棋子 / 请选择落点」，
+    轮到对手「等待对手落子」。
+  - 双方棋手名显示为「你 / 对手」（controlLabel、actorLabel）。
+  - 「自动下一步」在联机时也可用：它算出的着法现在会通过 netSendMove 发给对手，
+    不再只是本地落子造成不同步。
+  - 联机时「播放 / 暂停 AI 走子」按钮禁用（联机没有 AI 驱动）。
 
 回归测试:
-  verify-net 新增一条：原生桥返回“扁平房间”时，scan() 之后必须带 addr，
-  且 joinRoom 必须把 offer 发到 10.0.0.9:45455。修复前这条是红的。
+  verify-net 新增两条：
+    * 进入房间后红黑两个下拉都必须是「玩家」且被锁定
+    * 把 state.control 手动改回单机默认（黑方=AI）后，执黑一方在对手落子后
+      仍然可以走 —— 这正是本次报的故障，修复前这条是红的
 
 验证:
   verify-styles / verify-motion / verify-mate / verify-compat / verify-net 全部通过
   perft(3) = 79666（走子生成未变）
-  APK: versionCode 18 / versionName 2.2；证书 SHA-256 = 33C29CFD...；
-       assets/public 与 www/ 逐文件哈希一致；
-       YiJianLanPlugin 仍在 classes*.dex 中
-  桌面版同时重建（net.js / app.js 有改动）
+  APK: versionCode 19 / versionName 2.3；证书 SHA-256 = 33C29CFD...；
+       assets/public 与 www/ 逐文件哈希一致
+  桌面版同时重建（app.js / index.html 有改动）
 
 已知限制:
   - 仍需两台安卓真机实测一轮（这台机器没有安卓设备可用）
   - 局域网广播首次运行需要在 Windows 放行防火墙；路由器开了 AP 隔离或屏蔽广播时发现会失败
   - 联机需要两台设备都运行 2.0 以上
 
-说明: 基于 2.1 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
+说明: 基于 2.2 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
 产物输出到 fe\outputs。

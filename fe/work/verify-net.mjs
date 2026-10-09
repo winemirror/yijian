@@ -402,6 +402,29 @@ try {
   check("sync restores the board",
     engine.state.game.history.length === 1, `history=${engine.state.game.history.length}`);
 
+  // Regression: net play must not be gated by the single-player selects. They
+  // default to red = human / black = AI, which used to lock out whoever joined
+  // as black after the very first move. Put those values back by hand so the
+  // guard really exercises the reported failure.
+  engine.netBegin("guest", BLACK, "甲");
+  const redSelect = engine.__document.getElementById("redSetup");
+  const blackSelect = engine.__document.getElementById("blackSetup");
+  check("net: both side selects are pinned to 玩家",
+    redSelect.value === "player" && blackSelect.value === "player"
+      && redSelect.disabled === true && blackSelect.disabled === true,
+    `red=${redSelect.value} black=${blackSelect.value}`);
+
+  engine.state.control[RED] = "human";
+  engine.state.control[BLACK] = "ai";
+  check("net: waiting for the opponent cannot move", engine.canPlayNow() === false);
+  const redOpening = engine.generateLegalMoves(engine.state.game.board, RED)[0];
+  engine.netHandleMessage({
+    t: "move", from: redOpening.from, to: redOpening.to, ply: 0
+  });
+  check("net: black may move even though the select still reads AI",
+    engine.state.game.sideToMove === BLACK && engine.canPlayNow() === true,
+    `side=${engine.state.game.sideToMove} control=${engine.state.control[BLACK]}`);
+
   engine.netLeave();
   check("leaving clears the session", engine.netActive() === false);
   check("leaving frees local input", engine.canMoveLocally() === true);
