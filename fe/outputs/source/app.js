@@ -3968,8 +3968,12 @@
 
   async function netScan() {
     if (!Net || !state.net.available || state.net.inRoom) return;
-    const list = await Net.scan();
-    netRenderRooms(list);
+    try {
+      const list = await Net.scan();
+      netRenderRooms(list);
+    } catch (error) {
+      netLog("搜索房间失败：" + defaultTo(error && error.message, "unknown"));
+    }
   }
 
   async function netHost() {
@@ -3984,11 +3988,16 @@
     state.net.mySide = side;
     state.net.peerSide = opposite(side);
     state.net.phase = "announcing";
-    await Net.hostRoom({
-      name: defaultTo(elements.netRoomName && elements.netRoomName.value.trim(), "") || "我的棋局",
-      player: netPlayerName
-    });
-    netLog(`正在广播房间，我方执${side === RED ? "红" : "黑"}`);
+    try {
+      await Net.hostRoom({
+        name: defaultTo(elements.netRoomName && elements.netRoomName.value.trim(), "") || "我的棋局",
+        player: netPlayerName
+      });
+      netLog(`正在广播房间，我方执${side === RED ? "红" : "黑"}`);
+    } catch (error) {
+      state.net.phase = "error";
+      netLog("创建房间失败：" + defaultTo(error && error.message, "unknown"));
+    }
     netRender();
   }
 
@@ -4002,7 +4011,13 @@
     state.net.phase = "connecting";
     netLog(`正在连接「${room.name || "房间"}」…`);
     netRender();
-    await Net.joinRoom(room, { player: netPlayerName });
+    try {
+      await Net.joinRoom(room, { player: netPlayerName });
+    } catch (error) {
+      state.net.phase = "error";
+      netLog("加入房间失败：" + defaultTo(error && error.message, "unknown"));
+      netRender();
+    }
   }
 
   function netLeave() {
