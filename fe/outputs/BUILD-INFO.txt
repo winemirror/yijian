@@ -1,0 +1,70 @@
+﻿弈鉴 · 1.14 构建信息
+
+包名: com.yijian.xiangqi
+版本: 1.14 (versionCode 15)
+最低 Android: 7.0 (API 24)
+目标 Android: 16 (API 36)
+构建类型: Debug APK
+签名: Android Debug，与 1.5 ~ 1.13 同一密钥
+签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581
+签名方案: APK Signature Scheme v2
+
+APK 文件: Yijian-Xiangqi-1.14.apk
+文件大小: 4325219 bytes
+SHA-256: F15DC5DEB77CF0F3410687783B0BD0294E5E3DA41DBAB4707469DB7C57B9A8B2
+
+上一版: Yijian-Xiangqi-1.13.apk
+文件大小: 4322611 bytes
+SHA-256: 35CBF4D85EA4C0D337C79FBA2462EE13B34590CD779580D6153454EC588A8E7A
+
+本次改动: 老系统兼容性（Windows A/B/C，Android P0/P1/P2）
+
+Windows 桌面版:
+  A. 浏览器兜底链
+     Edge（4 个安装位置 + 注册表 App Paths\msedge.exe）
+     → Chrome → Brave → Vivaldi → Opera → 360 → QQ 浏览器
+     → 系统默认浏览器（ShellExecute，普通标签页打开）
+     精简版 Windows 没有 Edge 时不再直接失败。
+  B. 工作目录兜底
+     先试 exe 同级目录，不可写（Program Files、只读共享、被杀软隔离的下载目录）时
+     自动改用 %LOCALAPPDATA%\YiJian，日志与资源页面都写在那里。
+  C. 诊断
+     一个浏览器都找不到时，弹窗给出可复制的本地地址，同时把地址放进剪贴板，
+     并写入 YiJian-data\launcher.log。
+  说明: 首次打开"无法访问"的两个根因（HTTP.sys URL 预留在首启未就绪、只读目录写不进
+        资源）都已消除。服务仍是 127.0.0.1 随机端口，no-store，正确的 MIME 类型。
+        退出判定只看本次启动的那个浏览器进程，不会被用户已经开着的其它浏览器拖住。
+
+Android 版:
+  P0. index.html 顶部加入纯 ES5 兼容守卫
+      内核过旧时显示"浏览器版本过低"提示卡（并隐藏主界面），不再白屏；
+      另附 <noscript> 提示。守卫脚本自身就是 ES5，能被它要提醒的最老内核执行。
+  P1. CSS 兜底
+      aspect-ratio → padding-top:111.1111% 占位（9:10 棋盘）
+      inset:0 → top/right/bottom/left 四边
+      place-items → flex 居中
+      clamp() → 前一行写固定值，clamp 只作渐进增强
+  P2. 现代语法清理
+      移除全部 ?. / ?? / Array.prototype.at / Element.replaceChildren；
+      flex 容器的 gap 改为子元素外边距（所有内核都认），
+      grid 容器同时保留 grid-gap（Chrome 57-83 走别名，现代内核走 gap）。
+  实测: app.js 最低解析等级 ES2017（Chrome 55），守卫脚本 ES5；
+        Android 7（WebView 51-55）即可解析，更老的内核由 P0 守卫给出提示。
+
+其余文件:
+  YiJian-Xiangqi.exe / YiJian-Xiangqi-Portable.exe   桌面版（同一套前端）
+  xiangqi-local/                                     可直接打开的离线网页
+  source/{index.html,styles.css,app.js,ai-data.js}   本次改动的源文件（可覆盖回工程）
+  sfx/                                               音效试听页、候选 MP3 与来源说明
+
+验证:
+  verify-styles.mjs / verify-motion.mjs / verify-mate.mjs / verify-compat.mjs 全部通过
+  perft(3) = 79666（走子生成未变）
+  APK 内 assets/public 的文件哈希与 www/ 完全一致；
+  apksigner 证书 SHA-256 = 33C29CFD...（与 1.5 相同），versionCode 15 / 1.14
+  桌面版实机运行日志确认: 资源写入 → 本地服务 → 探测 200 → 识别 Edge → 启动 → 交接 → 干净退出
+  浏览器内实测: 桌面 1280 宽与移动 390 宽均无控制台错误，布局正常
+
+说明: 基于 w-2 工程 09:21 的状态继续叠加（移动端 meta / 触控优化、扁平棋子、拖影与虚线、
+计时器、11 种杀法判定、音效、胜负横幅）。本会话对 w-2 目录只有读权限，改动落在 fe\work
+工作副本，产物输出到 fe\outputs。
