@@ -2,14 +2,15 @@
 // Reuses the read-only engine harness from the original workspace.
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const BENCH = "C:/Users/su/Documents/Codex/2026-10-08/w-2/work/engine-bench/harness.mjs";
-const FONTLIB = "C:/Users/su/Documents/Codex/2026-10-08/w-2/work/font-tools/fontlib.mjs";
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repo = path.join(here, "..", "..");
+const BENCH = path.join(repo, "w-2", "work", "engine-bench", "harness.mjs");
+const FONTLIB = path.join(repo, "w-2", "work", "font-tools", "fontlib.mjs");
 const { loadEngine, RED } = await import(pathToFileURL(BENCH).href);
 const { readSfnt, readCodepoints } = await import(pathToFileURL(FONTLIB).href);
 
-const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const app = path.join(here, "www", "app.js");
 const css = fs.readFileSync(path.join(here, "www", "styles.css"), "utf8");
 const html = fs.readFileSync(path.join(here, "www", "index.html"), "utf8");

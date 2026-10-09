@@ -1,9 +1,13 @@
 // Embeds the chosen sound effects into the app data file as data URIs.
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const sfxDir = "C:/Users/su/Documents/Codex/2026-10-08/fe/outputs/sfx";
-const target = "C:/Users/su/Documents/Codex/2026-10-08/fe/work/www/ai-data.js";
+// Resolve against this script so the tool keeps working after the workspace
+// moves drives or folders.
+const here = path.dirname(fileURLToPath(import.meta.url));
+const sfxDir = path.join(here, "..", "..", "outputs", "sfx");
+const target = path.join(here, "..", "www", "ai-data.js");
 
 const chosen = {
   pickup: "pickup-2.mp3",

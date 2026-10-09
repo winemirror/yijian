@@ -2,9 +2,13 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+// Resolve against this file so the preview server follows the workspace
+// wherever it lives, instead of a hard-coded drive letter.
+const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(
-  process.env.ROOT || "C:/Users/su/Documents/Codex/2026-10-08/fe/outputs/xiangqi-local"
+  process.env.ROOT || path.join(here, "..", "outputs", "xiangqi-local")
 );
 const port = Number(process.env.PORT || 4290);
 const mime = {
