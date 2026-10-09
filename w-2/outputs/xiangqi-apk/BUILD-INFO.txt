@@ -1,0 +1,41 @@
+应用名称: 弈鉴
+包名: com.yijian.xiangqi
+版本: 1.8 (versionCode 9)
+最低 Android: 7.0 (API 24)
+目标 Android: 16 (API 36)
+构建类型: Debug APK
+签名: Android Debug，与 1.5 / 1.6 使用同一密钥
+签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581
+签名证书 SHA-1:  56BDBAFA2D9E04B0DABEB61C613C8AF52B908206
+签名方案: APK Signature Scheme v2
+
+APK 文件: Yijian-Xiangqi-1.8.apk
+文件大小: 4304187 bytes
+SHA-256: 4846D28D237E3B128B3793DCA84BED47915E85CA4FDFA6FC37BFC451F018D0E7
+
+上一版: Yijian-Xiangqi-1.7.apk
+文件大小: 4309809 bytes
+SHA-256: 09FFDD0D007A8F97FEE45FFDA1D15EE5AFC7C378E383BF4519554A94E65F89A0
+
+本次更新内容:
+- 为 iOS 运行做准备（Capacitor iOS / 添加到主屏幕）：补充 apple-mobile-web-app-*
+  与 theme-color 元信息，关闭数字自动识别为电话号码，增加移动端滚动与点按优化。
+  视口未使用 viewport-fit=cover，由系统自行避让刘海与状态栏，桌面端与安卓端布局不变。
+- 修复安卓端棋子字体。旧内嵌子集的来源字体（Windows STLiti）不含繁体字形，
+  黑方的 車、馬、將、砲 缺失，在安卓上会回退成系统字体，与红方不一致。
+  现改用覆盖完整的 LXGW 文楷（OFL 授权，可随包分发）重新生成子集，
+  并补入数字与字母（记谱如「炮8平7」），共 319 个字形，实测无缺失。
+  同时把字体以 data: URI 内嵌进 styles.css，不再依赖 WebView 对 .woff2
+  的 MIME 推断与资源加载，未压缩的 .woff2 仍作为回退源保留。
+- 新增自定义双方棋子颜色：红方、黑方分别可选色，选择会记忆并在下次启动时恢复。
+  颜色同时作用于棋盘棋子、吃子区和双方色标。
+
+内嵌资源: index.html / styles.css / app.js / ai-data.js / ai-worker-bootstrap.js
+内嵌字体: styles.css 内联 data: URI（70240 bytes，319 字形，含简繁棋子与数字字母）
+          另有 xiangqi-kai.woff2 作为回退
+联网权限: 未声明
+调度方式: 2-4 个 Web Worker，手机端和电脑端使用相同调度策略
+
+说明:
+与 1.5 / 1.6 签名一致，可直接覆盖安装升级。
+如果用于应用商店发布或长期升级，建议改用正式发布密钥签名。

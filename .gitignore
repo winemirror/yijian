@@ -1,0 +1,56 @@
+# 弈鉴工作区：只跟踪源码、配置、脚本、发布物和必要素材。
+# 大型工具链、缓存、临时解包目录和浏览器用户数据都不入库。
+
+# 操作系统与编辑器杂物
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+*.tmp
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# Node / JavaScript
+node_modules/
+.npm-cache/
+.npm/
+.pnpm-store/
+*.tsbuildinfo
+
+# Android / Gradle 工具链与构建缓存
+android-sdk/
+android-home/
+android-build/
+gradle-home/
+.gradle/
+**/build/
+**/dist/
+**/out/
+local.properties
+
+# Capacitor 自动同步生成的静态资源副本
+**/android/app/src/main/assets/public/
+
+# 检查/校验 APK 时产生的临时工作副本
+**/work/apk*/
+**/work/apk-inspect*/
+**/work/apk-verify*/
+**/work/launcher-test/bin/
+**/work/launcher-test/run*/
+
+# 浏览器用户数据与桌面版运行数据
+**/edge-profile/
+**/chrome-prof/
+**/chrome-profile/
+**/edge2/
+**/YiJian-data/
+
+# 音效素材包（已选用的 mp3 仍在 outputs/sfx 中保留）
+**/work/sfx/packs/
+
+# 正式发布密钥；yijian-debug.keystore 是保持升级签名一致的调试密钥，故意入库
+*.jks
+*.p12
+*.pfx
+keystore.properties

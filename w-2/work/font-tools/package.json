@@ -1,0 +1,8 @@
+{
+  "name": "xiangqi-font-tools",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "subset-font": "^2.9.0"
+  }
+}

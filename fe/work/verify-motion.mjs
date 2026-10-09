@@ -1,0 +1,156 @@
+// Verifies the move trail and the dashed previous-move connector.
+import fs from "node:fs";
+import path from "node:path";
+import { loadEngine, RED, BLACK } from "./harness.mjs";
+
+const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+const engine = loadEngine(path.join(here, "www", "app.js"));
+const css = fs.readFileSync(path.join(here, "www", "styles.css"), "utf8");
+const html = fs.readFileSync(path.join(here, "www", "index.html"), "utf8");
+
+const problems = [];
+const check = (label, ok, detail = "") => {
+  console.log(`  ${ok ? "PASS" : "FAIL"} ${label}${detail ? ` - ${detail}` : ""}`);
+  if (!ok) problems.push(label);
+};
+
+function fakePiece() {
+  const classes = new Set(["piece", "r"]);
+  const props = {};
+  const attributes = { "data-square": "51", "aria-label": "红车" };
+  return {
+    classes,
+    props,
+    attributes,
+    tabIndex: 0,
+    classList: {
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      contains: (name) => classes.has(name),
+      toggle: () => {},
+    },
+    style: {
+      setProperty: (name, value) => { props[name] = String(value); },
+      removeProperty: (name) => { delete props[name]; },
+    },
+    removeAttribute: (name) => { delete attributes[name]; },
+    remove: () => {},
+    cloneNode: () => fakePiece(),
+  };
+}
+
+console.log("== markup + stylesheet ==");
+check("board has a move-line layer", html.includes('id="moveLine"'));
+check(".move-line is styled", /\.move-line\s*\{[^}]*\}/.test(css));
+check(".piece.trail is styled", /\.piece\.trail\s*\{[^}]*\}/.test(css));
+check("trail keyframes exist", /@keyframes\s+piece-trail/.test(css));
+check("trail blurs the after-image", /\.piece\.trail\s*\{[^}]*blur\(/.test(css));
+
+console.log("== dashed connector ==");
+const line = () => engine.__document.getElementById("moveLine").innerHTML;
+{
+  engine.renderMoveLine();
+  check("no line before the first move", line() === "", JSON.stringify(line()));
+
+  engine.applyPieceColors({ red: "#ff0000", black: "#00ff00" });
+  engine.state.game.play(60, 51); // red pawn forward
+  engine.renderMoveLine();
+  const redLine = line();
+  console.log(`  red move   : ${redLine}`);
+  check("connector drawn after a move", redLine.includes("<line"));
+  check("connector is dashed", redLine.includes("stroke-dasharray"));
+  check("connector uses the red side colour", redLine.includes('stroke="#ff0000"'));
+  check("connector spans from 60 to 51",
+    redLine.includes('x1="650.0"') && redLine.includes('y1="650.0"')
+    && redLine.includes('x2="650.0"') && redLine.includes('y2="550.0"'),
+    redLine);
+
+  engine.state.game.play(1, 20); // black horse out
+  engine.renderMoveLine();
+  const blackLine = line();
+  console.log(`  black move : ${blackLine}`);
+  check("connector switches to the black side colour", blackLine.includes('stroke="#00ff00"'));
+  check("connector follows the newest move",
+    blackLine !== redLine
+    && blackLine.includes('x1="150.0"') && blackLine.includes('y1="50.0"')
+    && blackLine.includes('x2="250.0"') && blackLine.includes('y2="250.0"'),
+    blackLine);
+  check("connector anchors on the piece centres",
+    redLine.includes('y1="650.0"') && redLine.includes('y2="550.0"'));
+  check("pieces layer paints above the connector",
+    /\.pieces\s*\{[^}]*z-index:\s*3/.test(css)
+    && /\.move-line\s*\{[^}]*z-index:\s*2/.test(css));
+
+  engine.applyPieceColors(engine.DEFAULT_PIECE_COLORS);
+  engine.renderMoveLine();
+  check("connector uses the current custom colours",
+    line().includes('stroke="#1f1d1a"'), line());
+}
+
+console.log("== move trail ==");
+{
+  const pieces = engine.__document.getElementById("pieces");
+  const before = pieces.children.length;
+  const piece = fakePiece();
+  engine.spawnMoveTrail(piece, 6, 6, 6, 5, 300);
+  const added = pieces.children.slice(before);
+  console.log(`  spawned ${added.length} trail nodes`);
+  check("four after-images are spawned", added.length === 4, String(added.length));
+  check("after-images are tagged as trails",
+    added.every((node) => node.classList.contains("trail")));
+  check("after-images sit between the two squares",
+    added[0].props["--x"] === "6" && added[0].props["--y"] === "5.8",
+    JSON.stringify(added[0].props));
+  check("after-images fade with depth",
+    added.map((node) => Number(node.props["--trail-opacity"]))
+      .every((value, index, all) => index === 0 || value < all[index - 1]));
+  check("after-images are inert (no data-square / aria-label)",
+    added.every((node) => !("data-square" in node.attributes)
+      && !("aria-label" in node.attributes)));
+}
+
+console.log("");
+console.log("== clock ==");
+{
+  check("formatClock pads to mm:ss", engine.formatClock(0) === "00:00", engine.formatClock(0));
+  check("formatClock rolls minutes",
+    engine.formatClock(65000) === "01:05", engine.formatClock(65000));
+  check("formatClock adds hours",
+    engine.formatClock(3725000) === "1:02:05", engine.formatClock(3725000));
+
+  const doc = engine.__document;
+  check("clock elements exist in the status bar",
+    html.includes('id="gameClock"') && html.includes('id="turnClock"'));
+
+  engine.reset();
+  engine.state.startedAt = Date.now() - 65000;
+  engine.state.turnStartedAt = Date.now() - 7000;
+  engine.updateClocks();
+  const gameText = doc.getElementById("gameClock").textContent;
+  const turnText = doc.getElementById("turnClock").textContent;
+  console.log(`  ${gameText} / ${turnText}`);
+  check("total clock counts this game", gameText === "本局 01:05", gameText);
+  check("turn clock counts the current move", turnText === "本手 00:07", turnText);
+
+  engine.state.turnStartedAt = Date.now() - 7000;
+  const played = engine.state.game.play(60, 51);
+  engine.markMoveTiming(played);
+  check("each move records its own time",
+    played.moveTimeMs >= 6900 && played.moveTimeMs < 9000, String(played.moveTimeMs));
+
+  engine.renderMoveList();
+  const list = doc.getElementById("moveList").innerHTML;
+  check("move list shows the recorded time", /00:0\d/.test(list), list.slice(0, 140));
+  check("turn clock restarts for the next move",
+    Date.now() - engine.state.turnStartedAt < 1500,
+    String(Date.now() - engine.state.turnStartedAt));
+}
+
+console.log("");
+if (problems.length === 0) {
+  console.log("MOTION CHECKS PASSED");
+  process.exitCode = 0;
+} else {
+  console.log(`PROBLEMS: ${problems.join("; ")}`);
+  process.exitCode = 1;
+}

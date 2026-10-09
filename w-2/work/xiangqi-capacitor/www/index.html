@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f0e9">
+  <meta name="color-scheme" content="light">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="弈鉴">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>弈鉴 · 本地中国象棋</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">弈</div>
+        <div>
+          <h1>弈鉴</h1>
+          <p>本地中国象棋 · 人机对弈与分析</p>
+        </div>
+      </div>
+
+      <div class="topbar-controls">
+        <label class="field">
+          <span>红方</span>
+          <select id="redSetup">
+            <option value="human" selected>我执子</option>
+            <option value="ai:easy">AI · 入门</option>
+            <option value="ai:medium">AI · 初级</option>
+            <option value="ai:hard">AI · 中级</option>
+            <option value="ai:master">AI · 高级</option>
+            <option value="ai:idiot">AI · 瞎几把下</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>黑方</span>
+          <select id="blackSetup">
+            <option value="human">我执子</option>
+            <option value="ai:easy">AI · 入门</option>
+            <option value="ai:medium" selected>AI · 初级</option>
+            <option value="ai:hard">AI · 中级</option>
+            <option value="ai:master">AI · 高级</option>
+            <option value="ai:idiot">AI · 瞎几把下</option>
+          </select>
+        </label>
+        <label class="field color-field">
+          <span>红方棋子</span>
+          <input id="redColor" type="color" value="#b32e2a" aria-label="红方棋子颜色">
+        </label>
+        <label class="field color-field">
+          <span>黑方棋子</span>
+          <input id="blackColor" type="color" value="#1f1d1a" aria-label="黑方棋子颜色">
+        </label>
+        <label class="field">
+          <span>AI 速度</span>
+          <select id="autoSpeed">
+            <option value="fast">快</option>
+            <option value="normal" selected>中</option>
+            <option value="slow">慢</option>
+          </select>
+        </label>
+        <button id="playToggle" class="btn play-toggle" type="button" aria-label="播放" title="播放 / 暂停 AI 走子">&#9654;</button>
+        <button id="autoStep" class="btn" type="button" title="让系统替你走一步当前最优着法">自动下一步</button>
+        <button id="newGame" class="btn primary" type="button">新对局</button>
+        <button id="undoMove" class="btn" type="button">悔棋</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="game-column">
+        <div class="player-strip black">
+          <div class="player-main">
+            <span class="stone black-stone"></span>
+            <div>
+              <strong>黑方</strong>
+              <span id="blackLabel">AI · 初级</span>
+            </div>
+          </div>
+          <div id="blackCaptured" class="captured"></div>
+        </div>
+
+        <div class="board-stage">
+          <div id="board" class="board" aria-label="中国象棋棋盘">
+            <svg class="board-art" viewBox="0 0 900 1000" aria-hidden="true">
+              <defs>
+                <linearGradient id="boardGrain" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#d9a86a"/>
+                  <stop offset="0.48" stop-color="#e3b879"/>
+                  <stop offset="1" stop-color="#c88f50"/>
+                </linearGradient>
+                <pattern id="grain" width="34" height="34" patternUnits="userSpaceOnUse">
+                  <path d="M0 12 C8 7 16 17 34 10" stroke="#9b612f" stroke-opacity=".12" fill="none"/>
+                  <path d="M0 28 C12 22 19 33 34 26" stroke="#7a431f" stroke-opacity=".08" fill="none"/>
+                </pattern>
+              </defs>
+              <rect x="24" y="24" width="852" height="952" rx="8" fill="url(#boardGrain)"/>
+              <rect x="24" y="24" width="852" height="952" rx="8" fill="url(#grain)"/>
+              <g fill="none" stroke="#3b281c" stroke-width="3" stroke-linecap="round">
+                <rect x="50" y="50" width="800" height="900"/>
+                <path d="M150 50 V450 M150 550 V950 M250 50 V450 M250 550 V950 M350 50 V450 M350 550 V950 M450 50 V450 M450 550 V950"/>
+                <path d="M550 50 V450 M550 550 V950 M650 50 V450 M650 550 V950 M750 50 V450 M750 550 V950"/>
+                <path d="M50 150 H850 M50 250 H850 M50 350 H850 M50 450 H850"/>
+                <path d="M50 550 H850 M50 650 H850 M50 750 H850 M50 850 H850"/>
+                <path d="M350 50 L550 250 M550 50 L350 250"/>
+                <path d="M350 750 L550 950 M550 750 L350 950"/>
+              </g>
+              <g fill="#3b281c" font-family="serif" font-weight="700" font-size="54" letter-spacing="16">
+                <text x="245" y="526" text-anchor="middle">楚河</text>
+                <text x="655" y="526" text-anchor="middle">漢界</text>
+              </g>
+            </svg>
+            <div id="pieces" class="pieces"></div>
+            <div id="moveHints" class="move-hints"></div>
+            <div id="thinking" class="thinking" hidden>
+              <span></span><span></span><span></span>
+              <strong>AI 思考中</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="player-strip red">
+          <div class="player-main">
+            <span class="stone red-stone"></span>
+            <div>
+              <strong>红方</strong>
+              <span id="redLabel">你</span>
+            </div>
+          </div>
+          <div id="redCaptured" class="captured"></div>
+        </div>
+
+        <div class="game-status">
+          <div class="status-main">
+            <span id="turnBadge" class="turn-badge">红方行棋</span>
+            <span id="statusText" class="status-text">准备开始</span>
+          </div>
+          <div id="moveCounter" class="move-counter">第 1 回合</div>
+        </div>
+      </section>
+
+      <aside class="side-column">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="analysis" type="button">分析</button>
+          <button class="tab" data-tab="review" type="button">复盘</button>
+          <button class="tab" data-tab="chat" type="button">聊天</button>
+        </div>
+
+        <section id="panel-analysis" class="panel active" aria-label="分析面板">
+          <div class="win-card">
+            <div class="win-head">
+              <div>
+                <span>红方赢面</span>
+                <strong id="redWinValue">50%</strong>
+              </div>
+              <div id="evalScore" class="eval-score">0.00</div>
+            </div>
+            <div class="win-track">
+              <div id="redWinBar" class="win-red" style="width:50%"></div>
+              <div id="blackWinBar" class="win-black" style="width:50%"></div>
+            </div>
+            <div class="win-foot">
+              <span>黑方</span>
+              <span id="bestMoveText">最佳着法：--</span>
+              <span>红方</span>
+            </div>
+          </div>
+
+          <div class="metric-grid">
+            <div class="metric">
+              <span>最佳匹配</span>
+              <strong id="bestMatchRate">--</strong>
+            </div>
+            <div class="metric">
+              <span>平均损失</span>
+              <strong id="avgLoss">--</strong>
+            </div>
+            <div class="metric">
+              <span>问题着法</span>
+              <strong id="mistakeCount">--</strong>
+            </div>
+            <div class="metric">
+              <span>我的上一步</span>
+              <strong id="currentQuality">--</strong>
+            </div>
+          </div>
+
+          <div class="section-block">
+            <div class="section-head">
+              <h2>赢面走势</h2>
+              <span id="chartHint">每步更新</span>
+            </div>
+            <svg id="evalChart" class="eval-chart" viewBox="0 0 640 220" preserveAspectRatio="none"></svg>
+          </div>
+
+          <div class="section-block compact">
+            <div class="section-head">
+              <h2>本步判定</h2>
+              <span id="lastMoveText">等待落子</span>
+            </div>
+            <div id="moveVerdict" class="verdict empty">尚未产生着法</div>
+          </div>
+        </section>
+
+        <section id="panel-review" class="panel" aria-label="复盘面板">
+          <div class="review-controls">
+            <button id="firstMove" class="icon-btn" type="button" title="回到开局" aria-label="回到开局">|&lt;</button>
+            <button id="prevMove" class="icon-btn" type="button" title="上一步" aria-label="上一步">&lt;</button>
+            <button id="nextMove" class="icon-btn" type="button" title="下一步" aria-label="下一步">&gt;</button>
+            <button id="lastMove" class="icon-btn" type="button" title="回到最后" aria-label="回到最后">&gt;|</button>
+            <button id="liveMode" class="btn small" type="button">回到当前</button>
+          </div>
+          <div id="moveList" class="move-list">
+            <div class="empty-state">对局开始后，这里会显示棋谱和逐步分析。</div>
+          </div>
+        </section>
+
+        <section id="panel-chat" class="panel" aria-label="聊天面板">
+          <div class="local-note">本地模拟聊天 · 不连接网络</div>
+          <div id="chatLog" class="chat-log"></div>
+          <div class="quick-chat">
+            <button type="button" data-chat="好棋">好棋</button>
+            <button type="button" data-chat="承让">承让</button>
+            <button type="button" data-chat="再想想">再想想</button>
+            <button type="button" data-chat="精彩">精彩</button>
+          </div>
+          <form id="chatForm" class="chat-form">
+            <input id="chatInput" type="text" maxlength="80" placeholder="说点什么">
+            <button class="btn primary small" type="submit">发送</button>
+          </form>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script src="ai-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
