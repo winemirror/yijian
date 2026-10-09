@@ -20,10 +20,12 @@ New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
     /codepage:65001 `
     /out:$outputExe `
     /reference:System.Windows.Forms.dll `
+    /reference:System.Web.Extensions.dll `
     /resource:"$(Join-Path $webRoot 'index.html')",YiJian.index.html `
     /resource:"$(Join-Path $webRoot 'styles.css')",YiJian.styles.css `
     /resource:"$(Join-Path $webRoot 'ai-data.js')",YiJian.ai-data.js `
     /resource:"$(Join-Path $webRoot 'app.js')",YiJian.app.js `
+    /resource:"$(Join-Path $webRoot 'net.js')",YiJian.net.js `
     /resource:"$(Join-Path $webRoot 'ai-worker-bootstrap.js')",YiJian.ai-worker-bootstrap.js `
     /resource:"$(Join-Path $webRoot 'xiangqi-kai.woff2')",YiJian.xiangqi-kai.woff2 `
     (Join-Path $PSScriptRoot "Launcher.cs")

@@ -1,4 +1,4 @@
-// Reports the lowest ECMAScript version each script parses at, which maps to a
+﻿// Reports the lowest ECMAScript version each script parses at, which maps to a
 // minimum Chromium/WebView version. Uses a locally vendored acorn build.
 import fs from "node:fs";
 import path from "node:path";
@@ -45,7 +45,7 @@ function floorForSource(source) {
   return { edition: null, label: "beyond ES2022", chrome: ">Chrome 92", error: null };
 }
 
-for (const name of ["app.js", "ai-worker-bootstrap.js"]) {
+for (const name of ["app.js", "net.js", "ai-worker-bootstrap.js"]) {
   const file = path.join(here, "www", name);
   if (!fs.existsSync(file)) continue;
   report(name, fs.readFileSync(file, "utf8"));
