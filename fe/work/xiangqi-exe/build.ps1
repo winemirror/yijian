@@ -30,6 +30,12 @@ New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
     /resource:"$(Join-Path $webRoot 'xiangqi-kai.woff2')",YiJian.xiangqi-kai.woff2 `
     (Join-Path $PSScriptRoot "Launcher.cs")
 
+# A locked output file (the app is still running) makes csc fail without
+# stopping the script, which used to ship a stale exe silently.
+if ($LASTEXITCODE -ne 0) {
+    throw "C# compile failed with exit code $LASTEXITCODE. If the file is locked, close YiJian first."
+}
+
 # Keep the plain name in sync so either shortcut launches the same build.
 Copy-Item -LiteralPath $outputExe -Destination $aliasExe -Force
 
