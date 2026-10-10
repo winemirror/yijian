@@ -210,7 +210,7 @@ try {
       return Promise.resolve({ ok: true });
     },
     status() {
-      return Promise.resolve({ ok: true, proto: 1 });
+      return Promise.resolve({ ok: true, proto: 1, ips: ["10.0.0.9"] });
     },
   };
   const webRTC = makeFakeWebRTC();
@@ -220,6 +220,8 @@ try {
   const status = await net.ready();
   check("uses the capacitor plugin as the native bridge", status.mode === "native",
     status.mode);
+  check("local addresses are surfaced for diagnostics",
+    status.localIps.indexOf("10.0.0.9") >= 0, JSON.stringify(status.localIps));
   const rooms = await net.scan();
   check("rooms are read through the plugin", rooms.length === 1 && rooms[0].name === "棋局C",
     JSON.stringify(rooms));

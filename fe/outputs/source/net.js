@@ -68,12 +68,24 @@
         return Promise.resolve(bridge.rooms()).then(function (list) {
           return list || [];
         });
+      },
+      info: function () {
+        if (typeof bridge.status !== "function") return Promise.resolve(null);
+        try {
+          return Promise.resolve(bridge.status()).then(
+            function (result) { return result || null; },
+            function () { return null; }
+          );
+        } catch (error) {
+          return Promise.resolve(null);
+        }
       }
     };
   }
 
   // Talks to the desktop launcher's /lan/* HTTP endpoints.
   function httpTransport(base) {
+    var hello = null;
     function json(path, options) {
       return fetch(base + path, options).then(function (response) {
         if (!response.ok) throw new Error("lan " + path + " -> " + response.status);
@@ -82,6 +94,8 @@
     }
     return {
       name: "http",
+      setHello: function (info) { hello = info; },
+      info: function () { return Promise.resolve(hello); },
       send: function (addr, blob) {
         return json("/lan/send", {
           method: "POST",
@@ -189,7 +203,9 @@
       })
       .then(function (info) {
         if (!info || info.ok !== true) return null;
-        return httpTransport("lan/");
+        var transport = httpTransport("lan/");
+        transport.setHello(info);
+        return transport;
       })
       .catch(function () { return null; });
   }
@@ -215,6 +231,9 @@
       },
       send: function (ip, port, data) {
         return plugin.send({ ip: ip, port: port, data: data });
+      },
+      status: function () {
+        return plugin.status();
       }
     };
   }
@@ -267,14 +286,15 @@
 
   // ------------------------------------------------------------------- session
 
-  var listeners = { status: [], message: [], rooms: [] };
+  var listeners = { status: [], message: [], rooms: [], debug: [] };
   var state = {
     transport: null,
     mode: null,
     phase: "idle",      // idle | announcing | connecting | connected | error
     room: null,
     peer: null,
-    error: ""
+    error: "",
+    localIps: []
   };
   var announceTimer = null;
   var pollTimer = null;
@@ -286,6 +306,12 @@
     for (var index = 0; index < list.length; index += 1) {
       try { list[index](payload); } catch (error) { /* listener fault */ }
     }
+  }
+
+  // Low-volume trace of the connection lifecycle, surfaced in the app's room
+  // log so a failed pairing can be diagnosed from the UI alone.
+  function emitDebug(kind, detail) {
+    emit(listeners.debug, { kind: kind, detail: detail || null, at: now() });
   }
 
   // Transports report rooms in slightly different shapes: the tab transport
@@ -312,8 +338,18 @@
       phase: state.phase,
       room: state.room,
       peer: state.peer,
-      error: state.error
+      error: state.error,
+      localIps: state.localIps.slice()
     };
+  }
+
+  // Records where this device sits on the network, so the UI can show it and
+  // the user can tell at a glance whether both sides share a subnet.
+  function loadTransportInfo(transport) {
+    if (!transport || typeof transport.info !== "function") return Promise.resolve();
+    return Promise.resolve(transport.info()).then(function (info) {
+      if (info && info.ips && info.ips.length) state.localIps = info.ips.slice();
+    }).catch(function () { });
   }
 
   function pushStatus() {
@@ -366,6 +402,7 @@
       if (connection.connectionState === "failed"
         || connection.connectionState === "disconnected") {
         state.peer = null;
+        emitDebug("disconnected", connection.connectionState);
         state.phase = state.room && state.room.role === "host"
           ? "announcing"
           : (state.room ? "connecting" : "idle");
@@ -387,9 +424,11 @@
     channel = dataChannel;
     channel.onopen = function () {
       state.phase = "connected";
+      emitDebug("connected", null);
       pushStatus();
     };
     channel.onclose = function () {
+      emitDebug("closed", null);
       if (state.phase === "connected") {
         state.phase = state.room ? "announcing" : "idle";
         pushStatus();
@@ -404,6 +443,7 @@
 
   function handleBlob(addr, blob) {
     if (!blob || !blob.t) return;
+    emitDebug("recv", { type: blob.t, from: addr && addr.ip });
 
     if (blob.t === "offer" && state.room && state.room.role === "host") {
       if (!blob.sdp) {
@@ -486,7 +526,10 @@
         if (transport) {
           state.transport = transport;
           state.mode = transport.name;
+          return loadTransportInfo(transport);
         }
+        return undefined;
+      }).then(function () {
         return status();
       });
     },
@@ -496,6 +539,7 @@
     onStatus: function (cb) { listeners.status.push(cb); },
     onMessage: function (cb) { listeners.message.push(cb); },
     onRooms: function (cb) { listeners.rooms.push(cb); },
+    onDebug: function (cb) { listeners.debug.push(cb); },
 
     readySync: function () { return !!state.transport; },
     mode: function () { return state.mode; },
@@ -527,6 +571,7 @@
         state.error = "";
         if (state.transport.onBlob) state.transport.onBlob(handleBlob);
         state.transport.announce(room);
+        emitDebug("announce", room);
         if (announceTimer) scope.clearInterval(announceTimer);
         announceTimer = scope.setInterval(function () {
           if (state.room) state.transport.announce(state.room);
@@ -553,6 +598,7 @@
         state.phase = "connecting";
         state.error = "";
         if (state.transport.onBlob) state.transport.onBlob(handleBlob);
+        emitDebug("offer", target.addr);
         pc = newPeerConnection();
         attachChannel(pc, false);
         startPolling();

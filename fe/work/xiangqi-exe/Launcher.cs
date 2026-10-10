@@ -618,6 +618,10 @@ internal static class Launcher
                         continue;
                     }
                     LanRememberRoom(parts[1], parts[2], remote.Address.ToString(), LanPort);
+                    // Answer straight back over unicast as well. Some access
+                    // points deliver broadcast in only one direction, and this
+                    // makes sure the other side learns about us regardless.
+                    LanReplyAnnounce(remote);
                 }
                 continue;
             }
@@ -670,6 +674,75 @@ internal static class Launcher
             }
             lanBlobs.Add(new LanBlob { Ip = ip, Port = port, Json = json });
         }
+    }
+
+    // Unicast version of our own announcement, sent straight back to whoever
+    // just announced. Broadcast sometimes only travels one way on a given
+    // access point, and this makes discovery work either way.
+    private static void LanReplyAnnounce(IPEndPoint remote)
+    {
+        UdpClient socket = lanSocket;
+        string id = lanAnnounceId;
+        if (socket == null || string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+        byte[] payload = Encoding.UTF8.GetBytes(
+            LanAnnouncePrefix + id + "\t" + (lanAnnounceName ?? string.Empty)
+        );
+        try
+        {
+            socket.Send(payload, payload.Length, new IPEndPoint(remote.Address, LanPort));
+        }
+        catch
+        {
+            // Peer vanished or the interface refused the unicast.
+        }
+    }
+
+    // Every non-loopback IPv4 address, so the page can show the user which
+    // network it is actually on.
+    private static string LanLocalAddressesJson()
+    {
+        StringBuilder builder = new StringBuilder("[");
+        bool first = true;
+        try
+        {
+            foreach (NetworkInterface adapter in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (adapter.OperationalStatus != OperationalStatus.Up)
+                {
+                    continue;
+                }
+                if (adapter.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                {
+                    continue;
+                }
+                foreach (UnicastIPAddressInformation info in adapter.GetIPProperties().UnicastAddresses)
+                {
+                    if (info.Address.AddressFamily != AddressFamily.InterNetwork)
+                    {
+                        continue;
+                    }
+                    if (IPAddress.IsLoopback(info.Address))
+                    {
+                        continue;
+                    }
+                    if (!first)
+                    {
+                        builder.Append(',');
+                    }
+                    first = false;
+                    builder.Append('"').Append(JsonEscape(info.Address.ToString())).Append('"');
+                }
+            }
+        }
+        catch
+        {
+            // Report whatever was collected so far.
+        }
+        builder.Append(']');
+        return builder.ToString();
     }
 
     private static void LanAnnounceLoop()
@@ -855,6 +928,7 @@ internal static class Launcher
                 stream,
                 "{\"ok\":true,\"proto\":1,\"name\":\"YiJian\",\"platform\":\"windows\""
                     + ",\"udp\":" + LanPort + ",\"active\":" + (lanSocket != null ? "true" : "false")
+                    + ",\"ips\":" + LanLocalAddressesJson()
                     + "}"
             );
             return;
