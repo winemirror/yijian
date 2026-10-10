@@ -449,6 +449,72 @@ try {
 
 // ---------------------------------------------------------------------- part B
 
+console.log("== net.js + server: signalling through the relay ==");
+try {
+  const { listen, close } = await import("./server/server.mjs");
+  const port = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "stun:stun.example.test:3478",
+    turnUrl: "",
+    turnSecret: "",
+  });
+  const url = `ws://127.0.0.1:${port}/ws`;
+
+  const webRTC = makeFakeWebRTC();
+  const host = loadNet(webRTC, "relay-host", { WebSocket });
+  const guest = loadNet(webRTC, "relay-guest", { WebSocket });
+  await host.setServer(url);
+  await guest.setServer(url);
+
+  const created = await host.hostRoom({ name: "中继房" });
+  const code = created.room && created.room.id;
+  check("房主从服务端拿到 6 位房间码",
+    typeof code === "string" && /^[2-9A-HJ-NP-Z]{6}$/.test(code), String(code));
+  check("房主的传输通道是 server", created.mode === "server", created.mode);
+
+  await guest.joinByCode(code, { player: "乙", want: "play" });
+  await tick(150);
+
+  const hostPc = webRTC.all.find((pc) => pc.remoteDescription
+    && pc.remoteDescription.type === "offer");
+  const guestPc = webRTC.all.find((pc) => pc.localDescription
+    && pc.localDescription.type === "offer");
+  check("服务端把 offer 送到了房主", !!hostPc);
+  check("房主的应答回到了加入方", !!guestPc && !!guestPc.remoteDescription);
+  check("RTCPeerConnection 用上了服务端下发的 STUN",
+    !!hostPc && Array.isArray(hostPc.config.iceServers)
+      && hostPc.config.iceServers.length > 0,
+    JSON.stringify(hostPc && hostPc.config.iceServers));
+
+  if (hostPc && guestPc && hostPc.channel && guestPc.channel) {
+    hostPc.channel.peer = guestPc.channel;
+    guestPc.channel.peer = hostPc.channel;
+    hostPc.channel.open();
+    guestPc.channel.open();
+    await tick(20);
+
+    check("两端都报告已连接",
+      host.status().phase === "connected" && guest.status().phase === "connected",
+      `${host.status().phase}/${guest.status().phase}`);
+
+    let got = null;
+    host.onMessage((message) => { got = message; });
+    guest.send({ t: "chat", text: "relay hi" });
+    await tick(20);
+    check("棋局消息仍走 DataChannel（不经过服务端)",
+      !!got && got.text === "relay hi", JSON.stringify(got));
+  } else {
+    check("中继握手产生了数据通道", false);
+  }
+
+  host.leave();
+  guest.leave();
+  await close();
+} catch (error) {
+  check("中继握手完成", false, String(error && error.stack || error));
+}
+
 console.log("== net.js: host serves an opponent and a spectator ==");
 try {
   const webRTC = makeFakeWebRTC();

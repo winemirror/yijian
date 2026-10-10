@@ -338,6 +338,22 @@
           <div id="netIdle">
             <div class="section-block">
               <div class="section-head">
+                <h2>连接方式</h2>
+              </div>
+              <label class="field">
+                <span>方式</span>
+                <select id="netMode">
+                  <option value="lan" selected>局域网</option>
+                  <option value="server">服务器</option>
+                </select>
+              </label>
+              <label class="field" id="netServerField" hidden>
+                <span>服务器地址</span>
+                <input id="netServerUrl" type="text" placeholder="wss://yijian.example.com/ws">
+              </label>
+            </div>
+            <div class="section-block">
+              <div class="section-head">
                 <h2>创建房间</h2>
               </div>
               <label class="field">
@@ -363,6 +379,11 @@
               </div>
               <div id="netRooms" class="net-rooms">
                 <div class="empty-state">正在搜索局域网房间…</div>
+              </div>
+              <div id="netServerJoin" class="net-manual" hidden>
+                <input id="netRoomCode" type="text" maxlength="6" placeholder="房间码，如 7K3M9Q">
+                <button id="netJoinCode" class="btn small" type="button">加入</button>
+                <button id="netWatchCode" class="btn small" type="button">观战</button>
               </div>
               <div class="net-manual">
                 <input id="netManual" type="text" placeholder="手动地址，如 192.168.1.5:45455">
