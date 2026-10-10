@@ -1234,13 +1234,11 @@ select:focus {
   margin-bottom: 6px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--panel-strong);
   color: var(--ink);
   text-align: left;
-  cursor: pointer;
 }
 
 .net-room:hover {
@@ -1248,6 +1246,11 @@ select:focus {
 }
 
 .net-room-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 700;
 }
@@ -1257,6 +1260,15 @@ select:focus {
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
+}
+
+.net-room-actions {
+  display: flex;
+  margin-left: 8px;
+}
+
+.net-room-actions .btn {
+  margin: 0 0 0 6px;
 }
 
 .net-manual {

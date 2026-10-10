@@ -2510,6 +2510,10 @@
     net: {
       active: false,
       inRoom: false,
+      spectating: false,
+      want: "play",
+      opponentJoined: false,
+      spectators: 0,
       role: null,
       mySide: null,
       peerName: "",
@@ -3827,6 +3831,8 @@
     enterNetSetup();
     // Both sides start from a clean board, so the two copies line up.
     resetGame({ remote: true });
+    // Spectators that arrived before the opponent need the fresh board too.
+    if (role === "host") netSend({ t: "newGame" });
     appendChat("系统", `已连接，我方执${mySide === RED ? "红" : "黑"}`, false);
     netLog(`连接建立：我方执${mySide === RED ? "红" : "黑"}，对手 ${state.net.peerName}`);
     netRender();
@@ -3897,25 +3903,95 @@
     }
   }
 
-  function netHandleMessage(message) {
+  // Records a spectator, tells it the current position, and keeps the game
+  // untouched: a spectator never takes a seat.
+  function netAddSpectator(message, peer) {
+    const name = message.name || "观战者";
+    state.net.spectators += 1;
+    if (Net && peer && Net.setPeerKind) Net.setPeerKind(peer.id, "spectator");
+    netLog(`${name} 加入观战（共 ${state.net.spectators} 人观战）`);
+    if (Net && peer && Net.sendTo) {
+      Net.sendTo(peer.id, {
+        t: "welcome",
+        proto: Net ? Net.proto : 1,
+        role: "spectator",
+        name: netPlayerName,
+        redName: state.net.mySide === RED ? netPlayerName : state.net.peerName,
+        blackName: state.net.mySide === BLACK ? netPlayerName : state.net.peerName,
+        snapshot: state.game.snapshot(),
+        elapsedMs: Math.max(0, Date.now() - (state.startedAt || Date.now())),
+        turnMs: Math.max(0, Date.now() - (state.turnStartedAt || Date.now()))
+      });
+    }
+    netRender();
+  }
+
+  function netRejectFull(peer) {
+    if (Net && peer && Net.sendTo) {
+      Net.sendTo(peer.id, { t: "welcome", full: true, name: netPlayerName });
+    }
+    netLog("已有两名棋手，拒绝了一名想加入对局的玩家");
+  }
+
+  function netBeginSpectator(message) {
+    state.net.active = true;
+    state.net.inRoom = true;
+    state.net.spectating = true;
+    state.net.role = "guest";
+    state.net.mySide = null;
+    state.net.peerSide = null;
+    state.net.peerName = message.name || "房主";
+    state.net.phase = "connected";
+    state.net.pendingUndo = false;
+    enterNetSetup();
+    if (message.snapshot) netApplySync(message.snapshot);
+    if (typeof message.elapsedMs === "number") {
+      state.startedAt = Date.now() - message.elapsedMs;
+    }
+    if (typeof message.turnMs === "number") {
+      state.turnStartedAt = Date.now() - message.turnMs;
+    }
+    appendChat("系统", `开始观战（房主 ${state.net.peerName}）`, false);
+    netLog(`已开始观战：${message.redName || "红方"} vs ${message.blackName || "黑方"}`);
+    render();
+    netRender();
+  }
+
+  function netHandleMessage(message, peer) {
     if (!message || !message.t) return;
     switch (message.t) {
       case "hello":
-        state.net.peerName = message.name || state.net.peerName || "对手";
-        if (state.net.role === "host") {
+        if (state.net.role !== "host") break;
+        if (message.want === "spectate") {
+          netAddSpectator(message, peer);
+        } else if (state.net.opponentJoined) {
+          netRejectFull(peer);
+        } else {
+          state.net.peerName = message.name || state.net.peerName || "对手";
+          state.net.opponentJoined = true;
           netBegin("host", state.net.mySide, state.net.peerName);
-          netSend({
-            t: "welcome",
-            proto: Net ? Net.proto : 1,
-            side: state.net.peerSide,
-            name: netPlayerName
-          });
+          if (Net && peer && Net.sendTo) {
+            Net.sendTo(peer.id, {
+              t: "welcome",
+              proto: Net ? Net.proto : 1,
+              side: state.net.peerSide,
+              name: netPlayerName
+            });
+          }
         }
         break;
       case "welcome":
-        if (state.net.role === "guest" && !state.net.active) {
-          netBegin("guest", message.side, message.name || "对手");
+        if (state.net.role !== "guest") break;
+        if (message.full) {
+          netLog("房间已满：已有两名棋手，可以改用「观战」");
+          netLeave();
+          break;
         }
+        if (message.role === "spectator") {
+          netBeginSpectator(message);
+          break;
+        }
+        if (!state.net.active) netBegin("guest", message.side, message.name || "对手");
         break;
       case "move":
         netApplyMove(message);
@@ -3974,19 +4050,32 @@
       return;
     }
     list.forEach((room) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "net-room";
+      const row = document.createElement("div");
+      row.className = "net-room";
       const name = document.createElement("span");
       name.className = "net-room-name";
       name.textContent = room.name || "未命名房间";
       const meta = document.createElement("span");
       meta.className = "net-room-meta";
       meta.textContent = defaultTo(room.addr && (room.addr.ip || room.addr.id), "本机");
-      button.appendChild(name);
-      button.appendChild(meta);
-      button.addEventListener("click", () => netJoin(room));
-      elements.netRooms.appendChild(button);
+      const actions = document.createElement("span");
+      actions.className = "net-room-actions";
+      const join = document.createElement("button");
+      join.type = "button";
+      join.className = "btn small";
+      join.textContent = "加入";
+      join.addEventListener("click", () => netJoin(room, "play"));
+      const watch = document.createElement("button");
+      watch.type = "button";
+      watch.className = "btn small";
+      watch.textContent = "观战";
+      watch.addEventListener("click", () => netJoin(room, "spectate"));
+      actions.appendChild(join);
+      actions.appendChild(watch);
+      row.appendChild(name);
+      row.appendChild(meta);
+      row.appendChild(actions);
+      elements.netRooms.appendChild(row);
     });
   }
 
@@ -4006,15 +4095,31 @@
       }
     }
     if (elements.netStatusText && net.inRoom) {
-      elements.netStatusText.textContent = net.active
-        ? (net.role === "host" ? "房间已建立，对局进行中" : "已加入房间，对局进行中")
-        : (net.role === "host" ? "正在广播房间，等待加入…" : "正在连接房间…");
+      if (net.spectating) {
+        elements.netStatusText.textContent = "观战中（不执棋）";
+      } else if (net.active) {
+        elements.netStatusText.textContent = net.role === "host"
+          ? "房间已建立，对局进行中"
+          : "已加入房间，对局进行中";
+      } else {
+        elements.netStatusText.textContent = net.role === "host"
+          ? "正在广播房间，等待加入…"
+          : "正在连接房间…";
+      }
     }
     if (elements.netDetail && net.inRoom) {
-      elements.netDetail.textContent = net.active
-        ? `对手：${net.peerName} · 通道：${net.mode || "-"}`
-        : `通道：${net.mode || "-"}`;
+      if (net.spectating) {
+        elements.netDetail.textContent = `房主：${net.peerName} · 通道：${net.mode || "-"}`;
+      } else if (net.active) {
+        elements.netDetail.textContent = `对手：${net.peerName} · 通道：${net.mode || "-"}`
+          + (net.spectators ? ` · 观众 ${net.spectators}` : "");
+      } else {
+        elements.netDetail.textContent = `通道：${net.mode || "-"}`;
+      }
     }
+    // A spectator watches: no resign, no restart.
+    if (elements.netResign) elements.netResign.hidden = net.spectating;
+    if (elements.netNewGame) elements.netNewGame.hidden = net.spectating;
     if (elements.chatNote) {
       elements.chatNote.textContent = net.active
         ? "联机聊天 · 消息会实时发给对手"
@@ -4095,8 +4200,10 @@
         netLog("本机候选：" + (detail.text || ""));
         break;
       case "connected":
-        netLog("点对点通道已建立"
-          + (typeof detail.ice === "number" ? `（已交换 ${detail.ice} 个候选地址）` : ""));
+        netLog(detail.kind === "spectator" ? "观众已连上" : "点对点通道已建立");
+        break;
+      case "left":
+        netLog(detail.kind === "spectator" ? "一名观众离开了" : "对局通道断开");
         break;
       case "disconnected":
         netLog(`点对点通道断开（${event.detail || ""}）`);
@@ -4135,10 +4242,13 @@
     netRender();
   }
 
-  async function netJoin(room) {
+  async function netJoin(room, want) {
     if (!Net || !room) return;
+    const spectate = want === "spectate";
     state.net.inRoom = true;
     state.net.active = false;
+    state.net.spectating = spectate;
+    state.net.want = spectate ? "spectate" : "play";
     state.net.role = "guest";
     state.net.mySide = null;
     state.net.peerSide = null;
@@ -4147,7 +4257,7 @@
     netLog(`正在连接「${room.name || "房间"}」…`);
     netRender();
     try {
-      await Net.joinRoom(room, { player: netPlayerName });
+      await Net.joinRoom(room, { player: netPlayerName, want: state.net.want });
     } catch (error) {
       state.net.phase = "error";
       netLog("加入房间失败：" + defaultTo(error && error.message, "unknown"));
@@ -4161,6 +4271,10 @@
     exitNetSetup();
     state.net.active = false;
     state.net.inRoom = false;
+    state.net.spectating = false;
+    state.net.want = "play";
+    state.net.opponentJoined = false;
+    state.net.spectators = 0;
     state.net.role = null;
     state.net.mySide = null;
     state.net.peerSide = null;
@@ -4191,7 +4305,7 @@
       id: ip + ":" + port,
       name: ip,
       addr: { id: ip, ip: ip, port: port }
-    });
+    }, "play");
   }
 
   function netWire() {
@@ -4222,7 +4336,7 @@
       if (status.phase === "connected") {
         netLog("数据通道已建立");
         if (state.net.role === "guest" && !state.net.active) {
-          netSend({ t: "hello", name: netPlayerName });
+          netSend({ t: "hello", name: netPlayerName, want: state.net.want });
         }
       }
       if (status.phase === "announcing" && state.net.active) {
@@ -4231,7 +4345,7 @@
       }
       netRender();
     });
-    Net.onMessage(netHandleMessage);
+    Net.onMessage((message, peer) => netHandleMessage(message, peer));
     if (typeof Net.onDebug === "function") Net.onDebug(netHandleDebug);
     const status = await Net.ready();
     state.net.available = !!status.available;
