@@ -12,6 +12,9 @@ APP_DIR="${APP_DIR:-/opt/yijian}"
 PORT="${PORT:-8787}"
 STUN_HOST="${STUN_HOST:-}"
 
+# 以脚本自身所在目录为准，这样从任何 cwd 运行都能找到 server.mjs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [ "$(id -u)" != "0" ]; then
   echo "请用 root 运行（或 sudo ./deploy.sh）" >&2
   exit 1
@@ -43,7 +46,7 @@ fi
 
 echo "==> 安装到 $APP_DIR"
 install -d "$APP_DIR"
-install -m 0644 server.mjs "$APP_DIR/server.mjs"
+install -m 0644 "$SCRIPT_DIR/server.mjs" "$APP_DIR/server.mjs"
 
 echo "==> 写 systemd 单元"
 cat > /etc/systemd/system/yijian-signal.service <<EOF

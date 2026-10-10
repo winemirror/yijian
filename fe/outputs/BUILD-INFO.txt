@@ -1,63 +1,73 @@
-﻿弈鉴 · 3.0 构建信息
+弈鉴 · 3.1 构建信息（2026-10-10）
 
 包名: com.yijian.xiangqi
-版本: 3.0 (versionCode 29)
+版本: 3.1 (versionCode 30)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.0.apk
+APK 文件: Yijian-Xiangqi-3.1.apk
+文件大小: 4357301 bytes
+SHA-256: 7378AA1B4A98460CFA595263C3EF0EE5A1E796CFF201DC9242CF9277975CDCE1
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 464384 bytes
+SHA-256: 27CAF5724FF02477238A153FEAC2F0387AB74F28E0813C357240942C2A043F7B
+
+上一版: Yijian-Xiangqi-3.0.apk
 文件大小: 4356229 bytes
 SHA-256: BE5D3FDD79D3CE1DC86040232E97C79F528FBEEA1791ACB2D0BEE4EF64BF90B7
 
-上一版: Yijian-Xiangqi-2.12.apk
-文件大小: 4351745 bytes
-SHA-256: 0BAFECF9B53E3FE5A3E46DB91E6E08B0B1D9E1109C32BCE166A0D8073939EFDA
+本次改动: 修复服务器模式联机的两个真实设备问题
 
-本次改动: 服务器中转联机（3.0 第一阶段：服务端 + 客户端接入）
+1) 桌面端「通道错误：join a room first / 自检失败：loopback-failed」
+   服务器模式下自检仍然走了局域网的回环探测：它往 127.0.0.1 发一个
+   signal，而此刻客户端还没进任何房间，服务端按协议回 not_in_room。
+   旧实现把这个错误「寄存」在传输层收件箱里，27 秒后真正加入房间时，
+   等待 room.joined 的那一步先捡到了这条过期错误，于是加入流程直接被
+   判失败——用户看到的房间码其实是有效的。
+   修复：
+   - wsTransport.deliver() 现在只把 error 交给「当前正在等待」的请求，
+     不再寄存；waitFor() 也不再从收件箱里捞 error。
+   - selfTest() 对推送式传输（服务器模式）改为握手可达性探测：连上
+     WebSocket、等到 welcome 即判定「服务器可达」，不再发无效 signal。
+     界面日志相应显示「自检通过：服务器可达（server）」。
+   - wsTransport.info() 缓存握手结果：welcome 每个连接只发一次，第二次
+     调用 info() 以前会一直等到超时。
 
-服务端（fe/work/server/，零依赖）:
-  - server.mjs       信令与房间服务：房间登记（6 位房间码）、信令中转
-                     （offer/answer/ice 原样透传，不解析）、下发 ICE 配置
-  - verify-server.mjs 24 项断言，用真实 WebSocket 客户端跑
-  - coturn.conf      STUN/TURN 配置示例（3.0 只用到 STUN）
-  - deploy.sh        在 VPS 上一键安装 systemd 服务 + 自检
-  - README.md        协议、环境变量、Caddy/端口/部署清单
-  WebSocket 按 RFC 6455 自己实现，服务器上不需要 npm install。
-
-客户端（www/net.js）:
-  - 新增 wsTransport：信令走 WebSocket 到服务器（推送式，不再长轮询）
-  - ICE 配置改为服务端下发（之前写死为 []）；STUN 是公网联机的硬前提
-  - mDNS 候选改写只在局域网启用（服务器模式靠 STUN 的 srflx）
-  - setServer / setLan 两种模式互斥切换
-  - joinByCode：按房间码加入，所有人（含观众）都连房主
-  - 房主不再每 1.5 秒重复 announce（否则会在服务端每 1.5 秒建一个新房间）
-
-界面（www/app.js + index.html）:
-  - 联机页新增「连接方式：局域网 / 服务器」+ 服务器地址（存 localStorage）
-  - 服务器模式：隐藏局域网房间列表与手动 IP，改为房间码输入 + 加入 / 观战
-  - 建房成功后日志打出「房间码 XXXXXX —— 发给对手即可加入」
+2) 手机端「通道错误：Error: leave the current room」+ 房间码打印两次
+   创建房间被触发了两次（连点/重复事件）。第二次房间创建被服务端按
+   already_in_room 拒绝，而 hostRoom 内部改写的是共享的 state.room，
+   结果是这次「失败」的调用回读到了第一次成功创建的房间码，界面上于是
+   出现两行一模一样的「房间码 VBMSVJ」外加一条吓人的通道错误。
+   修复：
+   - app.js：netHost / netJoin / netJoinByCode 在已进房时任一次调用直接
+     返回，堵住重复触发。
+   - net.js：hostRoom 复用进行中的 Promise，连点只会发起一次 room.create；
+     并且只改写本次调用自己的 room 对象，不再动共享引用。
+   - 房间码输入校验收紧为 6 位（服务端固定 6 位），少打一位会直接提示
+     「请输入 6 位房间码」，不再白跑一趟服务端。
 
 验证:
-  verify-server：24 项全过（ICE 下发、建房、玩家加入、座位已满、改观战、
-    信令透传、房间列表、/health、房主离开解散、非法 JSON、不存在房间）
-  verify-net 新增：两个 net.js 实例经真实信令服务端完成完整握手 ——
-    拿到 6 位房间码、offer 到房主、应答回到加入方、RTCPeerConnection 用上
-    服务端下发的 STUN、两端 connected、棋局消息仍走 DataChannel（不经过服务端）
-  既有 5 个套件全绿；perft(3) = 79666
-  桌面版已重建
+  verify-net 新增两项回归：
+   - 「服务器模式自检报告服务器可达」+「自检之后仍能正常建房（旧错误不再
+     污染队列）」——复现桌面端 selfTest → 建房 的完整时序。
+   - 「重复建房只发一次创建请求（两次调用得到同一个房间码）」。
+  verify-net（含服务器信令握手）、verify-server、verify-styles、verify-motion、
+  verify-mate、verify-compat 全部通过。
+  APK 内 assets/public/net.js 已确认含本次修复；apksigner 校验签名仍为
+  33c29cfd…a581，与 1.5 相同。
 
 部署状态:
-  **尚未部署**。沙箱在 PATH 最前面放了 ssh/scp 拒绝垫片（C:\Users\su\.sbx-denybin），
-  本会话又没有申请权限的工具，因此无法从沙箱登录 VPS。
-  部署请用 fe/work/server/deploy.sh（见 README.md 的部署章节）。
+  信令服务器 wss://c.syjnb.top/ws 与 STUN stun:45.32.112.15:3478 已上线，
+  本次不改服务端代码，无需重新部署。
 
-已知限制（3.0）:
-  - 没有 TURN：家用宽带之间多数能直连；两端都在手机流量上（国内运营商 CGNAT）
-    失败率明显偏高；企业网/校园网经常不通。接口已留，加 TURN 只改服务端。
+已知限制（沿用 3.0）:
+  - 没有 TURN：家用宽带之间多数能直连；两端都在手机流量上（国内运营商
+    CGNAT）失败率明显偏高；企业网/校园网经常不通。接口已留，加 TURN 只改
+    服务端。
   - 公网必须 wss://：安卓端 https://localhost、桌面端 http://127.0.0.1 都是
     安全上下文，ws:// 会被浏览器按混合内容拦掉。
   - 服务端不存棋局，重启会让在线房间失效（客户端重连重建即可）。
 
-说明: 基于 2.12 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
-产物输出到 fe\outputs。
+说明: 基于 3.0 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
