@@ -2467,6 +2467,13 @@
     netUnavailable: document.getElementById("netUnavailable"),
     netIdle: document.getElementById("netIdle"),
     netActive: document.getElementById("netActive"),
+    netMode: document.getElementById("netMode"),
+    netServerField: document.getElementById("netServerField"),
+    netServerUrl: document.getElementById("netServerUrl"),
+    netServerJoin: document.getElementById("netServerJoin"),
+    netRoomCode: document.getElementById("netRoomCode"),
+    netJoinCode: document.getElementById("netJoinCode"),
+    netWatchCode: document.getElementById("netWatchCode"),
     netRoomName: document.getElementById("netRoomName"),
     netSide: document.getElementById("netSide"),
     netHost: document.getElementById("netHost"),
@@ -4162,6 +4169,8 @@
 
   async function netScan() {
     if (!Net || !state.net.available || state.net.inRoom) return;
+    // Server mode has no LAN room list - you join by room code.
+    if (state.net.mode === "server") return;
     try {
       const list = await Net.scan();
       netRenderRooms(list);
@@ -4180,6 +4189,93 @@
   }
 
   let lastRoomKey = "";
+
+  const NET_MODE_KEY = "xiangqi.net.mode";
+  const NET_SERVER_KEY = "xiangqi.net.server";
+
+  function loadNetMode() {
+    try {
+      return {
+        mode: localStorage.getItem(NET_MODE_KEY) || "lan",
+        server: localStorage.getItem(NET_SERVER_KEY) || ""
+      };
+    } catch (error) {
+      return { mode: "lan", server: "" };
+    }
+  }
+
+  function saveNetMode(mode, server) {
+    try {
+      localStorage.setItem(NET_MODE_KEY, mode);
+      localStorage.setItem(NET_SERVER_KEY, server);
+    } catch (error) { /* private mode */ }
+  }
+
+  // Switching between LAN discovery and the relay server. Both drop whatever
+  // room is open, so the log says so explicitly.
+  async function netApplyMode() {
+    if (!Net) return;
+    const mode = defaultTo(elements.netMode && elements.netMode.value, "lan");
+    const server = defaultTo(elements.netServerUrl && elements.netServerUrl.value.trim(), "");
+    const useServer = mode === "server";
+    saveNetMode(mode, server);
+
+    if (elements.netServerField) elements.netServerField.hidden = !useServer;
+    if (elements.netServerJoin) elements.netServerJoin.hidden = !useServer;
+    if (elements.netRefresh) elements.netRefresh.hidden = useServer;
+    if (elements.netRooms) elements.netRooms.hidden = useServer;
+    if (elements.netManual) elements.netManual.parentNode.hidden = useServer;
+
+    if (useServer && !server) {
+      netLog("请先填写服务器地址，再创建或加入房间");
+      return;
+    }
+    if (useServer) {
+      if (typeof Net.setServer === "function") await Net.setServer(server);
+      netLog("已切换到服务器模式：" + server);
+    } else {
+      if (typeof Net.setLan === "function") await Net.setLan();
+      netLog("已切换到局域网模式");
+    }
+
+    const status = await Net.ready();
+    state.net.available = !!status.available;
+    state.net.mode = status.mode;
+    if (status.localIps && status.localIps.length) {
+      netLog("本机局域网地址：" + status.localIps.join(" / "));
+    }
+    netRender();
+  }
+
+  // Server mode joins by room code instead of picking from a discovered list.
+  async function netJoinByCode(want) {
+    if (!Net || typeof Net.joinByCode !== "function") return;
+    const code = defaultTo(elements.netRoomCode && elements.netRoomCode.value.trim(), "")
+      .toUpperCase();
+    if (code.length < 4) {
+      netLog("请输入房间码");
+      return;
+    }
+    const spectate = want === "spectate";
+    state.net.inRoom = true;
+    state.net.active = false;
+    state.net.spectating = spectate;
+    state.net.want = spectate ? "spectate" : "play";
+    state.net.role = "guest";
+    state.net.mySide = null;
+    state.net.peerSide = null;
+    state.net.phase = "connecting";
+    enterNetSetup();
+    netLog(`正在通过服务器加入「${code}」…`);
+    netRender();
+    try {
+      await Net.joinByCode(code, { player: netPlayerName, want: state.net.want });
+    } catch (error) {
+      state.net.phase = "error";
+      netLog("加入房间失败：" + defaultTo(error && error.message, "unknown"));
+      netRender();
+    }
+  }
 
   // One-click diagnostic: proves whether this device can do UDP at all before
   // blaming the network.
@@ -4263,11 +4359,15 @@
     state.net.phase = "announcing";
     enterNetSetup();
     try {
-      await Net.hostRoom({
+      const created = await Net.hostRoom({
         name: defaultTo(elements.netRoomName && elements.netRoomName.value.trim(), "") || "我的棋局",
         player: netPlayerName
       });
-      netLog(`正在广播房间，我方执${side === RED ? "红" : "黑"}`);
+      if (created && created.mode === "server" && created.room && created.room.id) {
+        netLog(`房间码 ${created.room.id} —— 发给对手即可加入`);
+      } else {
+        netLog(`正在广播房间，我方执${side === RED ? "红" : "黑"}`);
+      }
     } catch (error) {
       state.net.phase = "error";
       netLog("创建房间失败：" + defaultTo(error && error.message, "unknown"));
@@ -4352,6 +4452,16 @@
     if (elements.netLeave) elements.netLeave.addEventListener("click", netLeave);
     if (elements.netResign) elements.netResign.addEventListener("click", netResign);
     if (elements.netManualJoin) elements.netManualJoin.addEventListener("click", netManualJoin);
+    if (elements.netMode) elements.netMode.addEventListener("change", netApplyMode);
+    if (elements.netServerUrl) {
+      elements.netServerUrl.addEventListener("change", netApplyMode);
+    }
+    if (elements.netJoinCode) {
+      elements.netJoinCode.addEventListener("click", () => netJoinByCode("play"));
+    }
+    if (elements.netWatchCode) {
+      elements.netWatchCode.addEventListener("click", () => netJoinByCode("spectate"));
+    }
     if (elements.netNewGame) {
       elements.netNewGame.addEventListener("click", () => resetGame());
     }
@@ -4382,6 +4492,18 @@
     });
     Net.onMessage((message, peer) => netHandleMessage(message, peer));
     if (typeof Net.onDebug === "function") Net.onDebug(netHandleDebug);
+    // Restore the last used connection mode before probing anything.
+    const savedMode = loadNetMode();
+    if (elements.netMode) elements.netMode.value = savedMode.mode;
+    if (elements.netServerUrl) elements.netServerUrl.value = savedMode.server;
+    const serverMode = savedMode.mode === "server";
+    if (elements.netServerField) elements.netServerField.hidden = !serverMode;
+    if (elements.netServerJoin) elements.netServerJoin.hidden = !serverMode;
+    if (elements.netRefresh) elements.netRefresh.hidden = serverMode;
+    if (elements.netRooms) elements.netRooms.hidden = serverMode;
+    if (serverMode && savedMode.server && typeof Net.setServer === "function") {
+      await Net.setServer(savedMode.server);
+    }
     const status = await Net.ready();
     state.net.available = !!status.available;
     state.net.mode = status.mode;
