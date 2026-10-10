@@ -59,8 +59,8 @@
       stopAnnounce: function () {
         try { bridge.stopAnnounce(); } catch (error) { /* best effort */ }
       },
-      poll: function (cursor) {
-        return Promise.resolve(bridge.inbox(cursor)).then(function (result) {
+      poll: function (cursor, waitMs) {
+        return Promise.resolve(bridge.inbox(cursor, waitMs)).then(function (result) {
           return result || { cursor: cursor, blobs: [] };
         });
       },
@@ -87,8 +87,10 @@
   function httpTransport(base) {
     var hello = null;
     function json(path, options) {
+      // `path` must be relative: base already carries the "lan/" prefix, and a
+      // leading slash here used to produce "lan//lan/inbox" -> 404.
       return fetch(base + path, options).then(function (response) {
-        if (!response.ok) throw new Error("lan " + path + " -> " + response.status);
+        if (!response.ok) throw new Error("lan " + base + path + " -> " + response.status);
         return response.json();
       });
     }
@@ -97,32 +99,33 @@
       setHello: function (info) { hello = info; },
       info: function () { return Promise.resolve(hello); },
       send: function (addr, blob) {
-        return json("/lan/send", {
+        return json("send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ip: addr.ip, port: addr.port, data: blob })
         });
       },
       announce: function (room) {
-        json("/lan/announce", {
+        json("announce", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ room: room })
         }).catch(function () { /* best effort */ });
       },
       stopAnnounce: function () {
-        json("/lan/announce", {
+        json("announce", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ stop: true })
         }).catch(function () { /* best effort */ });
       },
-      poll: function (cursor) {
-        return json("/lan/inbox?since=" + encodeURIComponent(cursor)
-          + "&wait=" + POLL_TIMEOUT_MS);
+      poll: function (cursor, waitMs) {
+        var wait = waitMs === undefined ? POLL_TIMEOUT_MS : waitMs;
+        return json("inbox?since=" + encodeURIComponent(cursor)
+          + "&wait=" + encodeURIComponent(wait));
       },
       rooms: function () {
-        return json("/lan/rooms").then(function (result) {
+        return json("rooms").then(function (result) {
           return (result && result.rooms) || [];
         });
       }
@@ -234,8 +237,9 @@
           return (result && result.rooms) || [];
         });
       },
-      inbox: function (cursor) {
-        return Promise.resolve(plugin.inbox({ since: cursor })).then(function (result) {
+      inbox: function (cursor, waitMs) {
+        return Promise.resolve(plugin.inbox({ since: cursor, wait: waitMs || 0 }))
+          .then(function (result) {
           return result || { cursor: cursor, blobs: [] };
         });
       },
@@ -640,7 +644,8 @@
         if (!state.transport) return { ok: false, reason: "no-transport", mode: null };
         var token = "selftest-" + randomId();
         var from = 0;
-        return Promise.resolve(state.transport.poll(0)).then(function (result) {
+        // wait=0: the self test must not sit on the long poll for 25 seconds.
+        return Promise.resolve(state.transport.poll(0, 0)).then(function (result) {
           from = result && typeof result.cursor === "number" ? result.cursor : 0;
           return state.transport.send(
             { ip: "127.0.0.1", port: 0, id: "127.0.0.1" },
@@ -649,7 +654,7 @@
         }).then(function () {
           return new Promise(function (resolve) { scope.setTimeout(resolve, 500); });
         }).then(function () {
-          return Promise.resolve(state.transport.poll(from));
+          return Promise.resolve(state.transport.poll(from, 0));
         }).then(function (result) {
           var blobs = (result && result.blobs) || [];
           for (var index = 0; index < blobs.length; index += 1) {

@@ -187,6 +187,49 @@ console.log("== net.js: native bridge wins ==");
   check("prefers the shell bridge", status.mode === "native", status.mode);
 }
 
+console.log("== net.js: desktop http bridge ==");
+try {
+  const urls = [];
+  const respond = (body) => Promise.resolve({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve(body),
+  });
+  const fetchStub = (url) => {
+    urls.push(url);
+    if (url.indexOf("hello") >= 0) {
+      return respond({ ok: true, proto: 1, ips: ["192.168.5.31"] });
+    }
+    if (url.indexOf("rooms") >= 0) return respond({ rooms: [] });
+    if (url.indexOf("inbox") >= 0) return respond({ cursor: 0, blobs: [] });
+    return respond({ ok: true });
+  };
+  const net = loadNet(null, "http", { fetch: fetchStub });
+  const status = await net.ready();
+  check("desktop page uses the http bridge", status.mode === "http", status.mode);
+  await net.scan();
+  await net.hostRoom({ id: "room-http", name: "棋局H" });
+  await tick(20);
+  await net.selfTest();
+
+  // The page prefixes every call with "lan/", so a path that already starts
+  // with a slash produced "lan//lan/inbox" and 404'd on the desktop. That made
+  // the PC unable to announce, poll or answer at all.
+  const doubled = urls.filter((url) => url.indexOf("//") >= 0 || url.indexOf("lan/") !== 0);
+  check("http bridge never doubles the lan/ prefix", doubled.length === 0,
+    JSON.stringify(urls));
+  check("http bridge uses the expected endpoints",
+    urls.indexOf("lan/hello") >= 0
+      && urls.some((url) => url.indexOf("lan/rooms") === 0)
+      && urls.some((url) => url.indexOf("lan/inbox") === 0)
+      && urls.indexOf("lan/announce") >= 0
+      && urls.indexOf("lan/send") >= 0,
+    JSON.stringify(urls));
+  net.leave();
+} catch (error) {
+  check("http bridge completed", false, String(error && error.message || error));
+}
+
 console.log("== net.js: capacitor plugin bridge ==");
 try {
   const calls = [];
