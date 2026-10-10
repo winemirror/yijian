@@ -3957,8 +3957,29 @@
     netRender();
   }
 
+  // Game events the host forwards from one peer to the rest. Without this a
+  // spectator only ever sees the host's own moves, because the opponent's move
+  // is addressed to the host alone.
+  const NET_RELAY_TYPES = {
+    move: true,
+    chat: true,
+    resign: true,
+    newGame: true,
+    undoReq: true,
+    undoOk: true,
+    undoNo: true,
+    sync: true
+  };
+
+  function netRelayFromHost(message, peer) {
+    if (state.net.role !== "host" || !peer || !Net || !Net.sendExcept) return;
+    if (!NET_RELAY_TYPES[message.t]) return;
+    Net.sendExcept(peer.id, message);
+  }
+
   function netHandleMessage(message, peer) {
     if (!message || !message.t) return;
+    netRelayFromHost(message, peer);
     switch (message.t) {
       case "hello":
         if (state.net.role !== "host") break;

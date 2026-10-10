@@ -826,6 +826,21 @@
       return api.send(message, peerId);
     },
 
+    // Fan out to everyone except one peer. The host uses this to relay what a
+    // player sent on to the spectators without echoing it back.
+    sendExcept: function (peerId, message) {
+      var sent = false;
+      eachPeer(function (peer) {
+        if (peerId && peer.key === peerId) return;
+        if (!peer.channel || peer.channel.readyState !== "open") return;
+        try {
+          peer.channel.send(JSON.stringify(message));
+          sent = true;
+        } catch (error) { /* that peer is gone */ }
+      });
+      return sent;
+    },
+
     // The app marks a peer as "player" or "spectator" once the hello arrives.
     setPeerKind: function (peerId, kind) {
       var peer = peers[peerId];
