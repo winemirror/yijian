@@ -4026,8 +4026,48 @@
     try {
       const list = await Net.scan();
       netRenderRooms(list);
+      const key = list.map((room) => `${room.id}@${room.addr ? room.addr.ip : ""}`).join(",");
+      if (key !== lastRoomKey) {
+        lastRoomKey = key;
+        netLog(list.length
+          ? `发现 ${list.length} 个房间：${list
+            .map((room) => `${room.name || "未命名"}(${room.addr ? room.addr.ip : "?"})`)
+            .join("、")}`
+          : "暂未发现局域网房间");
+      }
     } catch (error) {
       netLog("搜索房间失败：" + defaultTo(error && error.message, "unknown"));
+    }
+  }
+
+  let lastRoomKey = "";
+
+  function netHandleDebug(event) {
+    if (!event || !event.kind) return;
+    const detail = event.detail || {};
+    switch (event.kind) {
+      case "announce":
+        netLog(`正在广播房间「${detail.name || ""}」`);
+        break;
+      case "offer":
+        netLog(`已向 ${detail.ip || "?"}:${detail.port || "?"} 发送连接请求`);
+        break;
+      case "recv":
+        if (detail.type === "offer" || detail.type === "answer") {
+          netLog(`收到 ${detail.from || "对方"} 的${detail.type === "offer" ? "连接请求" : "应答"}`);
+        }
+        break;
+      case "connected":
+        netLog("点对点通道已建立");
+        break;
+      case "disconnected":
+        netLog(`点对点通道断开（${event.detail || ""}）`);
+        break;
+      case "closed":
+        netLog("点对点通道已关闭");
+        break;
+      default:
+        break;
     }
   }
 
@@ -4151,9 +4191,13 @@
       netRender();
     });
     Net.onMessage(netHandleMessage);
+    if (typeof Net.onDebug === "function") Net.onDebug(netHandleDebug);
     const status = await Net.ready();
     state.net.available = !!status.available;
     state.net.mode = status.mode;
+    if (status.localIps && status.localIps.length) {
+      netLog("本机局域网地址：" + status.localIps.join(" / "));
+    }
     if (state.net.available) {
       netScan();
       window.setInterval(() => {

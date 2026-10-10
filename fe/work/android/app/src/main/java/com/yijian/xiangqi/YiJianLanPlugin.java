@@ -187,7 +187,29 @@ public class YiJianLanPlugin extends Plugin {
         result.put("platform", "android");
         result.put("udp", LAN_PORT);
         result.put("active", running);
+        result.put("ips", localAddresses());
         call.resolve(result);
+    }
+
+    private static JSArray localAddresses() {
+        JSArray list = new JSArray();
+        try {
+            for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!network.isUp() || network.isLoopback()) {
+                    continue;
+                }
+                for (InterfaceAddress address : network.getInterfaceAddresses()) {
+                    InetAddress host = address.getAddress();
+                    if (host == null || host.getAddress().length != 4 || host.isLoopbackAddress()) {
+                        continue;
+                    }
+                    list.put(host.getHostAddress());
+                }
+            }
+        } catch (Exception error) {
+            Log.w(TAG, "local address scan failed: " + error.getMessage());
+        }
+        return list;
     }
 
     // --------------------------------------------------------------- service side
@@ -298,6 +320,9 @@ public class YiJianLanPlugin extends Plugin {
                         continue;
                     }
                     rememberRoom(parts[1], parts[2], ip);
+                    // Answer straight back over unicast as well: some access
+                    // points only carry broadcast in one direction.
+                    replyAnnounce(packet.getAddress());
                 }
             } else if (text.startsWith(BLOB_PREFIX)) {
                 rememberBlob(ip, port, text.substring(BLOB_PREFIX.length()));
@@ -342,6 +367,22 @@ public class YiJianLanPlugin extends Plugin {
             blob.port = port;
             blob.data = data;
             BLOBS.add(blob);
+        }
+    }
+
+    /** Unicast copy of our own announcement, sent back to whoever just announced. */
+    private static void replyAnnounce(InetAddress target) {
+        DatagramSocket current = socket;
+        String id = announceId;
+        if (current == null || id == null || id.isEmpty()) {
+            return;
+        }
+        byte[] payload = (ANNOUNCE_PREFIX + id + "\t" + announceName)
+                .getBytes(StandardCharsets.UTF_8);
+        try {
+            current.send(new DatagramPacket(payload, payload.length, target, LAN_PORT));
+        } catch (Exception error) {
+            Log.w(TAG, "reply announce failed: " + error.getMessage());
         }
     }
 
