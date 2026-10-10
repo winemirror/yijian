@@ -1,48 +1,43 @@
-﻿弈鉴 · 2.7 构建信息
+﻿弈鉴 · 2.8 构建信息
 
 包名: com.yijian.xiangqi
-版本: 2.7 (versionCode 23)
+版本: 2.8 (versionCode 24)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-2.7.apk
+APK 文件: Yijian-Xiangqi-2.8.apk
+文件大小: 4348285 bytes
+SHA-256: D52C7DB22D61EA23F03BBB76A8CE93163EDCFB7CCCEE3AD1A19619FC97ABD591
+
+上一版: Yijian-Xiangqi-2.7.apk
 文件大小: 4355457 bytes
 SHA-256: 6EC9EFAB3289BA978F85B3886CCCCEBFA7A76C31BE46BC29E066C549BA077AF5
 
-上一版: Yijian-Xiangqi-2.6.apk
-文件大小: 4347701 bytes
-SHA-256: 8E435FC9F591455489FF7BC8463DEA678A5614528FF7426C064B6D62B6E46777
-
-本次改动: 修复"电脑与手机无法联机"的真正根因
+本次改动: 修复 WebRTC 因 ICE 候选丢失而连接失败
 
 根因:
-  net.js 的桌面 HTTP 通道里，base 是 "lan/"，而各方法传的是 "/lan/inbox" 这样的
-  绝对路径，拼出来是 "lan//lan/inbox"，C# 路由匹配不到就返回 404。
-  结果桌面版页面调用 C# 的每一个请求全部 404：
-    /lan/announce 404  -> 电脑其实从未广播过房间
-    /lan/rooms    404  -> 电脑看不到任何房间
-    /lan/inbox    404  -> 电脑收不到手机发来的连接请求，永远不会应答
-    /lan/send     404  -> 电脑发不出应答
-  手机 ↔ 手机走的是原生插件、不经过这条 HTTP 通道，所以一直正常。
-  现象（手机看不到电脑房间、手工输 IP 也连不上）由此全部解释。
+  收到 offer 时 setRemoteDescription 是异步的，但同一批轮询里的 ICE 候选是紧接着
+  同步处理的。此时远程描述还没就绪，addIceCandidate 立即 reject，被 catch 静默吞掉，
+  候选就永久丢了 —— 表现为信令正常（"收到 xx 的连接请求"）但 15 秒后
+  "点对点通道断开（failed）"。手机端收到 answer 时同理，而且 onicecandidate 可能
+  先于 answer 发出，候选反而排在 answer 前面。
 
 修复:
-  - httpTransport 内所有路径改为相对形式（send / announce / inbox / rooms），
-    不再自己带 "/lan/" 前缀
-  - poll 增加 waitMs 参数：网络自检用 wait=0，不再卡 25 秒长轮询
-  - 「房间日志」移出 #netActive，未进房间时也可见（否则自检结果写进隐藏元素）
-  - build.ps1 编译失败时抛错，避免静默留下旧 exe
+  - 增加 pendingIce 缓冲：远程描述就绪前的候选先入队，setRemoteDescription 完成后
+    统一回放（flushPendingIce）
+  - 通道建立时在房间日志里显示交换到的候选数量
+  - 新增日志："已把应答发回 x.x.x.x"、"收到 x.x.x.x 的候选地址"，
+    把"发送应答 / 收到候选"这两步也暴露出来
 
 验证:
-  - 端到端实测（桌面版真实运行 + 浏览器操作）：
-      开始网络自检… -> 自检通过：http 通道可收发（本机回环已验证）
-      正在广播房间「我的棋局」/ 正在广播房间，我方执红
-  - verify-net 新增一条：http 通道产生的 URL 必须是 lan/hello、lan/rooms、
-    lan/announce、lan/send、lan/inbox?…，出现 "//" 或非 lan/ 前缀即失败
-  - 5 个套件全绿；perft(3) = 79666
-  - APK 的 assets/public 与 www/ 逐文件哈希一致
-  - 桌面版已重建（重建前需先关闭正在运行的弈鉴）
+  verify-net 新增一条：伪造的 RTCPeerConnection 在远程描述未就绪时调用
+  addIceCandidate 会记录并 reject；把 offer 与 ice 放在同一批次喂进去，
+  断言没有候选被提前应用、且队列中的候选最终被回放。
+  修复前该用例是红的（lateCandidates=1, applied=0），现在是绿的。
+  5 个套件全绿；perft(3) = 79666
+  APK 的 assets/public 与 www/ 逐文件哈希一致
+  桌面版已重建（重建前需先关闭正在运行的弈鉴）
 
-说明: 基于 2.4 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
+说明: 基于 2.7 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
 产物输出到 fe\outputs。
