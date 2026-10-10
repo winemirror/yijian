@@ -3416,9 +3416,6 @@
     const ghost = captureCapturedGhost(move.from, move.to);
     const record = state.game.play(move.from, move.to);
     markMoveTiming(record);
-    // "自动下一步" is available to the local player in a net game too, so the
-    // move it picks has to reach the other side.
-    if (netActive()) netSendMove(record);
     state.reviewPly = state.game.history.length;
     elements.thinking.hidden = true;
     const animationDuration = renderMove(record, ghost);
@@ -3449,6 +3446,9 @@
     const usable = state.live
       && !state.busy
       && state.game.result.type === "ongoing"
+      // Disabled in a net game: letting the engine pick your move would play
+      // the game for you.
+      && !netActive()
       && canPlayNow();
     elements.autoStep.disabled = !usable;
   }
@@ -3517,6 +3517,10 @@
   // is on the move, using that side's remembered AI strength.
   async function playAutoStep() {
     if (state.busy || !state.live || state.game.result.type !== "ongoing") return;
+    if (netActive()) {
+      setStatus("联机对局不使用自动下一步");
+      return;
+    }
     if (!canPlayNow()) {
       setStatus(state.control[state.game.sideToMove] === "ai" && !netActive()
         ? "该方由 AI 执子"
@@ -3965,9 +3969,9 @@
     chat: true,
     resign: true,
     newGame: true,
-    undoReq: true,
+    // undoOk is a board change, so spectators need it. A request or a refusal
+    // is not, and must not be answered by anyone but the opponent.
     undoOk: true,
-    undoNo: true,
     sync: true
   };
 
@@ -4021,9 +4025,17 @@
         appendChat(state.net.peerName || "对手", String(defaultTo(message.text, "")), false);
         break;
       case "undoReq":
+        // Only the opponent answers an undo request; a spectator just watches.
+        if (state.net.spectating) break;
         netIncomingUndo();
         break;
       case "undoOk":
+        if (state.net.spectating) {
+          // The two players agreed: the spectator's copy has to roll back too.
+          undo({ remote: true });
+          netLog("双方同意悔棋");
+          break;
+        }
         if (state.net.pendingUndo) {
           state.net.pendingUndo = false;
           netLog("对手同意悔棋");
@@ -4302,6 +4314,8 @@
     state.net.peerName = "";
     state.net.phase = "idle";
     state.net.pendingUndo = false;
+    // Refresh the buttons: "auto next step" comes back once the room is gone.
+    render();
     netRender();
   }
 
