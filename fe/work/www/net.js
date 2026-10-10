@@ -132,6 +132,187 @@
     };
   }
 
+  // Signalling through a relay server instead of LAN broadcast. Push based -
+  // the server hands us messages as they arrive, so poll() is a no-op.
+  // The server never sees chess moves: those ride the WebRTC data channel.
+  function wsTransport(url) {
+    var socket = null;
+    var readyPromise = null;
+    var blobHandler = null;
+    var inbox = [];
+    var waiters = [];
+    var iceServers = [];
+    var selfId = null;
+    var currentRoom = null;
+
+    function post(message) {
+      if (!socket || socket.readyState !== 1) return false;
+      socket.send(JSON.stringify(message));
+      return true;
+    }
+
+    // Resolves on the next message of `type`, or on any `error` so a server
+    // rejection surfaces as an exception instead of a timeout.
+    function waitFor(type, timeoutMs) {
+      for (var index = 0; index < inbox.length; index += 1) {
+        if (inbox[index].t === type || inbox[index].t === "error") {
+          return Promise.resolve(inbox.splice(index, 1)[0]);
+        }
+      }
+      return new Promise(function (resolve, reject) {
+        var waiter = { type: type, resolve: null };
+        var timer = scope.setTimeout(function () {
+          var index = waiters.indexOf(waiter);
+          if (index >= 0) waiters.splice(index, 1);
+          reject(new Error("server timeout: " + type));
+        }, timeoutMs || 8000);
+        waiter.resolve = function (message) {
+          scope.clearTimeout(timer);
+          resolve(message);
+        };
+        waiters.push(waiter);
+      });
+    }
+
+    function deliver(message) {
+      for (var index = 0; index < waiters.length; index += 1) {
+        if (waiters[index].type === message.t || message.t === "error") {
+          waiters.splice(index, 1)[0].resolve(message);
+          return;
+        }
+      }
+      inbox.push(message);
+    }
+
+    function connect() {
+      if (readyPromise) return readyPromise;
+      readyPromise = new Promise(function (resolve, reject) {
+        if (typeof scope.WebSocket !== "function") {
+          reject(new Error("no-websocket"));
+          return;
+        }
+        var ws;
+        try {
+          ws = new scope.WebSocket(url);
+        } catch (error) {
+          reject(error);
+          return;
+        }
+        socket = ws;
+        ws.onopen = function () {
+          post({ t: "hello", proto: 1, name: "棋友" });
+          resolve();
+        };
+        ws.onerror = function () {
+          reject(new Error("server unreachable"));
+        };
+        ws.onmessage = function (event) {
+          var message = null;
+          try {
+            message = JSON.parse(event.data);
+          } catch (error) {
+            return;
+          }
+          if (!message || !message.t) return;
+          if (message.t === "signal") {
+            if (blobHandler) blobHandler({ id: message.from }, message.data);
+            return;
+          }
+          if (message.t === "welcome") {
+            selfId = message.clientId;
+            iceServers = (message.ice && message.ice.servers) || [];
+          }
+          deliver(message);
+        };
+      });
+      return readyPromise;
+    }
+
+    function expect(message) {
+      if (message.t === "error") {
+        throw new Error(message.message || message.code || "server error");
+      }
+      return message;
+    }
+
+    return {
+      name: "server",
+      push: true,
+      url: url,
+      onBlob: function (cb) { blobHandler = cb; },
+      ready: connect,
+      info: function () {
+        return connect().then(function () {
+          // The ICE config rides on "welcome", which can land just after the
+          // socket opens - wait for it instead of returning an empty list.
+          return waitFor("welcome");
+        }).then(function () {
+          return { ice: iceServers, ips: [], serverId: selfId };
+        });
+      },
+      poll: function () { return Promise.resolve({ cursor: 0, blobs: [] }); },
+      rooms: function () {
+        return connect()
+          .then(function () { post({ t: "room.list" }); return waitFor("room.list"); })
+          .then(function (message) { return expect(message).rooms || []; });
+      },
+      announce: function (room) {
+        return connect().then(function () {
+          post({ t: "room.create", name: room && room.name, visibility: "public" });
+          return waitFor("room.joined");
+        }).then(function (message) {
+          expect(message);
+          currentRoom = message.room;
+          selfId = message.self.id;
+          return { id: message.room.id, name: message.room.name };
+        });
+      },
+      stopAnnounce: function () {
+        post({ t: "room.leave" });
+        currentRoom = null;
+      },
+      send: function (addr, blob) {
+        return connect().then(function () {
+          post({ t: "signal", to: addr && addr.id, data: blob });
+        });
+      },
+      // Server mode only: join by room code and learn which peer is the hub.
+      joinSignalling: function (code, want) {
+        return connect().then(function () {
+          post({
+            t: "room.join",
+            roomId: String(code || "").toUpperCase(),
+            want: want === "spectate" ? "spectate" : "play"
+          });
+          return waitFor("room.joined");
+        }).then(function (message) {
+          expect(message);
+          currentRoom = message.room;
+          selfId = message.self.id;
+          var hostId = message.room.hostId;
+          var hostName = "";
+          for (var index = 0; index < message.peers.length; index += 1) {
+            if (message.peers[index].id === hostId) hostName = message.peers[index].name;
+          }
+          return {
+            room: message.room,
+            selfId: selfId,
+            hostId: hostId,
+            hostName: hostName,
+            peers: message.peers
+          };
+        });
+      },
+      close: function () {
+        try { if (socket) socket.close(); } catch (error) { /* gone */ }
+        socket = null;
+        readyPromise = null;
+        inbox = [];
+        waiters = [];
+      }
+    };
+  }
+
   // Same machine only: lets two windows/tabs play each other for testing.
   // Rooms are tracked here so the session layer sees the same shape as the
   // native transport (a list of {id, name, addr}).
@@ -288,6 +469,11 @@
   }
 
   function chooseTransport() {
+    // Server mode is opt-in and replaces LAN discovery entirely.
+    if (state.prefer === "server") {
+      if (!state.serverUrl) return Promise.resolve(null);
+      return Promise.resolve(wsTransport(state.serverUrl));
+    }
     var bridge = scope.YiJianNative && scope.YiJianNative.lan;
     if (bridge) return Promise.resolve(nativeTransport(bridge));
     if (scope.Capacitor) return waitForCapacitorPlugin(scope.Capacitor, 10);
@@ -308,7 +494,11 @@
     room: null,
     peer: null,
     error: "",
-    localIps: []
+    localIps: [],
+    // "auto" keeps the LAN chain; "server" uses the relay for signalling.
+    prefer: "auto",
+    serverUrl: "",
+    iceServers: []
   };
   var announceTimer = null;
   var pollTimer = null;
@@ -356,6 +546,8 @@
       room: state.room,
       peer: state.peer,
       peers: peerCounts(),
+      prefer: state.prefer,
+      serverUrl: state.serverUrl,
       error: state.error,
       localIps: state.localIps.slice()
     };
@@ -367,6 +559,8 @@
     if (!transport || typeof transport.info !== "function") return Promise.resolve();
     return Promise.resolve(transport.info()).then(function (info) {
       if (info && info.ips && info.ips.length) state.localIps = info.ips.slice();
+      // STUN/TURN for the relay path comes from the server, not from a constant.
+      if (info && info.ice && info.ice.length) state.iceServers = info.ice.slice();
     }).catch(function () { });
   }
 
@@ -452,6 +646,26 @@
     pushStatus();
   }
 
+  // Drops every connection and the current transport, ready for a mode switch.
+  function resetTransport() {
+    closePeers();
+    stopPolling();
+    if (announceTimer) scope.clearInterval(announceTimer);
+    announceTimer = null;
+    if (state.transport && typeof state.transport.close === "function") {
+      try { state.transport.close(); } catch (error) { /* gone */ }
+    }
+    state.transport = null;
+    state.mode = null;
+    state.iceServers = [];
+    state.room = null;
+    state.peer = null;
+    state.phase = "idle";
+    state.error = "";
+    pushStatus();
+    return status();
+  }
+
   function closePeers() {
     eachPeer(function (peer) {
       try { if (peer.channel) peer.channel.close(); } catch (error) { /* gone */ }
@@ -463,7 +677,9 @@
   }
 
   function newPeerConnection(peer) {
-    var connection = new scope.RTCPeerConnection({ iceServers: ICE_SERVERS });
+    var connection = new scope.RTCPeerConnection({
+      iceServers: state.iceServers.length ? state.iceServers : ICE_SERVERS
+    });
     connection.onicecandidate = function (event) {
       if (!event.candidate) return;
       // Log the first few local candidates: whether they carry a real LAN
@@ -615,7 +831,12 @@
       if (!target || !target.pc) return;
       target.iceCount = (target.iceCount || 0) + 1;
       if (target.iceCount === 1) emitDebug("ice", { from: addr && addr.ip });
-      var candidate = normalizeCandidate(blob.sdp, addr && addr.ip);
+      // The .local -> real-IP rewrite only makes sense on a LAN, where the
+      // source address of the UDP packet is the peer. Over the relay the
+      // candidates that matter are the STUN ones.
+      var candidate = state.mode === "server"
+        ? blob.sdp
+        : normalizeCandidate(blob.sdp, addr && addr.ip);
       if (!target.pc.remoteDescription) {
         target.pendingIce.push(candidate);
         return;
@@ -647,6 +868,8 @@
   }
 
   function startPolling() {
+    // Push transports (the relay server) deliver on their own; nothing to poll.
+    if (state.transport && state.transport.push) return;
     if (pollTimer) scope.clearTimeout(pollTimer);
     pollTimer = scope.setTimeout(pollOnce, 0);
   }
@@ -710,15 +933,27 @@
         state.phase = "announcing";
         state.error = "";
         if (state.transport.onBlob) state.transport.onBlob(handleBlob);
-        state.transport.announce(room);
-        emitDebug("announce", room);
-        if (announceTimer) scope.clearInterval(announceTimer);
-        announceTimer = scope.setInterval(function () {
-          if (state.room) state.transport.announce(state.room);
-        }, ANNOUNCE_MS);
-        startPolling();
-        pushStatus();
-        return status();
+        // The relay server assigns the room code, so wait for its answer
+        // before deciding what to display.
+        return Promise.resolve(state.transport.announce(room)).then(function (info) {
+          if (info && info.id) state.room.id = info.id;
+          if (info && info.name) state.room.name = info.name;
+          emitDebug("announce", state.room);
+          // Re-announcing is a LAN thing; asking the server to create the room
+          // again every 1.5s would spawn a room per tick.
+          if (!state.transport.push) {
+            if (announceTimer) scope.clearInterval(announceTimer);
+            announceTimer = scope.setInterval(function () {
+              if (state.room) state.transport.announce(state.room);
+            }, ANNOUNCE_MS);
+          }
+          startPolling();
+          pushStatus();
+          return status();
+        }).catch(function (error) {
+          fail(describe(error));
+          return status();
+        });
       });
     },
 
@@ -771,6 +1006,78 @@
             return status();
           });
       });
+    },
+
+    // Server mode: join by room code. Everyone dials the room's host, exactly
+    // like the LAN path does.
+    joinByCode: function (code, options) {
+      return api.ready().then(function () {
+        if (!state.transport || typeof state.transport.joinSignalling !== "function") {
+          fail("no-server");
+          return status();
+        }
+        if (!hasPeerConnection()) {
+          fail("no-webrtc");
+          return status();
+        }
+        closePeers();
+        state.room = { id: String(code || "").toUpperCase(), name: "", role: "guest" };
+        state.phase = "connecting";
+        state.error = "";
+        if (state.transport.onBlob) state.transport.onBlob(handleBlob);
+        return state.transport.joinSignalling(code, options && options.want)
+          .then(function (info) {
+            state.room = { id: info.room.id, name: info.room.name, role: "guest" };
+            var hostId = info.hostId;
+            var key = peerKeyFor({ id: hostId });
+            var peer = {
+              key: key,
+              addr: { id: hostId },
+              name: info.hostName || "",
+              kind: "player",
+              pc: null,
+              channel: null,
+              pendingIce: []
+            };
+            peers[key] = peer;
+            state.peer = publicPeer(peer);
+            emitDebug("offer", peer.addr);
+            peer.pc = newPeerConnection(peer);
+            attachChannel(peer, peer.pc, false);
+            return peer.pc.createOffer()
+              .then(function (offer) { return peer.pc.setLocalDescription(offer); })
+              .then(function () {
+                return state.transport.send(peer.addr, {
+                  t: "offer",
+                  sdp: peer.pc.localDescription.sdp,
+                  name: (options && options.name) || "",
+                  want: (options && options.want) || "play"
+                });
+              })
+              .then(function () {
+                pushStatus();
+                return status();
+              });
+          })
+          .catch(function (error) {
+            fail(describe(error));
+            return status();
+          });
+      });
+    },
+
+    // Switching between LAN and the relay drops whatever is running.
+    setServer: function (url) {
+      var text = String(url || "").trim();
+      state.prefer = text ? "server" : "auto";
+      state.serverUrl = text;
+      return resetTransport();
+    },
+
+    setLan: function () {
+      state.prefer = "auto";
+      state.serverUrl = "";
+      return resetTransport();
     },
 
     // Loopback probe: send a packet to ourselves and check it comes back
