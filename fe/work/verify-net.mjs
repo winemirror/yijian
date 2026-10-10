@@ -94,6 +94,11 @@ function makeFakeWebRTC() {
     return Promise.resolve();
   };
   FakePeerConnection.prototype.addIceCandidate = function () {
+    if (!this.remoteDescription) {
+      this.lateCandidates = (this.lateCandidates || 0) + 1;
+      return Promise.reject(new Error("remote description is not set"));
+    }
+    this.appliedCandidates = (this.appliedCandidates || 0) + 1;
     return Promise.resolve();
   };
   FakePeerConnection.prototype.close = function () {
@@ -228,6 +233,35 @@ try {
   net.leave();
 } catch (error) {
   check("http bridge completed", false, String(error && error.message || error));
+}
+
+console.log("== net.js: late ICE candidates are buffered ==");
+try {
+  const webRTC = makeFakeWebRTC();
+  const host = loadNet(webRTC, "ice-host");
+  await host.ready();
+  await host.hostRoom({ id: "room-ice", name: "候选" });
+  await tick(20);
+
+  // Offer and candidate land in the same poll batch, so the candidate is seen
+  // while setRemoteDescription is still pending. It used to be rejected and
+  // dropped, which left the connection stuck at "failed".
+  const from = { ip: "10.0.0.5", port: 45455 };
+  host.__handleBlob(from, { t: "offer", sdp: "sdp-offer" });
+  host.__handleBlob(from, { t: "ice", sdp: { candidate: "candidate:1" } });
+  await tick(40);
+
+  const hostPc = webRTC.all.find((pc) => pc.remoteDescription
+    && pc.remoteDescription.type === "offer");
+  check("the offer reached the guest handler", !!hostPc);
+  check("no candidate was pushed before the remote description",
+    !hostPc || !hostPc.lateCandidates, String(hostPc && hostPc.lateCandidates));
+  check("the queued candidate is replayed afterwards",
+    !!hostPc && (hostPc.appliedCandidates || 0) >= 1,
+    String(hostPc && hostPc.appliedCandidates));
+  host.leave();
+} catch (error) {
+  check("late ICE buffering completed", false, String(error && error.message || error));
 }
 
 console.log("== net.js: capacitor plugin bridge ==");

@@ -4085,8 +4085,15 @@
           netLog(`收到 ${detail.from || "对方"} 的${detail.type === "offer" ? "连接请求" : "应答"}`);
         }
         break;
+      case "answer":
+        netLog(`已把应答发回 ${detail.ip || "?"}`);
+        break;
+      case "ice":
+        netLog(`收到 ${detail.from || "对方"} 的候选地址`);
+        break;
       case "connected":
-        netLog("点对点通道已建立");
+        netLog("点对点通道已建立"
+          + (typeof detail.ice === "number" ? `（已交换 ${detail.ice} 个候选地址）` : ""));
         break;
       case "disconnected":
         netLog(`点对点通道断开（${event.detail || ""}）`);

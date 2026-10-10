@@ -315,6 +315,11 @@
   var pollCursor = 0;
   var pc = null;
   var channel = null;
+  // Candidates that arrived before the remote description was ready. Without
+  // this buffer they were rejected by addIceCandidate and silently dropped,
+  // which left the connection stuck at "failed".
+  var pendingIce = [];
+  var iceReceived = 0;
 
   function emit(list, payload) {
     for (var index = 0; index < list.length; index += 1) {
@@ -393,6 +398,8 @@
   // ------------------------------------------------------------ WebRTC plumbing
 
   function closePeer() {
+    pendingIce = [];
+    iceReceived = 0;
     if (channel) {
       try { channel.close(); } catch (error) { /* already closed */ }
       channel = null;
@@ -426,6 +433,16 @@
     return connection;
   }
 
+  // Replay any candidates that arrived ahead of the remote description.
+  function flushPendingIce() {
+    if (!pc || !pc.remoteDescription) return;
+    var queued = pendingIce;
+    pendingIce = [];
+    for (var index = 0; index < queued.length; index += 1) {
+      pc.addIceCandidate(queued[index]).catch(function () { /* stale */ });
+    }
+  }
+
   function attachChannel(connection, isHost) {
     if (isHost) {
       connection.ondatachannel = function (event) { bindChannel(event.channel); };
@@ -438,7 +455,7 @@
     channel = dataChannel;
     channel.onopen = function () {
       state.phase = "connected";
-      emitDebug("connected", null);
+      emitDebug("connected", { ice: iceReceived });
       pushStatus();
     };
     channel.onclose = function () {
@@ -471,12 +488,14 @@
       pc = newPeerConnection();
       attachChannel(pc, true);
       pc.setRemoteDescription({ type: "offer", sdp: blob.sdp })
+        .then(function () { flushPendingIce(); })
         .then(function () { return pc.createAnswer(); })
         .then(function (answer) { return pc.setLocalDescription(answer); })
         .then(function () {
           state.transport.send(addr, {
             t: "answer", sdp: pc.localDescription.sdp, name: state.room.name
           });
+          emitDebug("answer", { ip: addr.ip, port: addr.port });
         })
         .catch(function (error) { fail(describe(error)); });
       return;
@@ -488,12 +507,19 @@
         return;
       }
       pc.setRemoteDescription({ type: "answer", sdp: blob.sdp })
+        .then(function () { flushPendingIce(); })
         .catch(function (error) { fail(describe(error)); });
       return;
     }
 
     if (blob.t === "ice" && pc) {
-      pc.addIceCandidate(blob.sdp).catch(function () { /* late candidate */ });
+      iceReceived += 1;
+      if (iceReceived === 1) emitDebug("ice", { from: addr && addr.ip });
+      if (!pc.remoteDescription) {
+        pendingIce.push(blob.sdp);
+        return;
+      }
+      pc.addIceCandidate(blob.sdp).catch(function () { /* stale candidate */ });
     }
   }
 
