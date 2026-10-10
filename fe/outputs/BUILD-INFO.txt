@@ -1,41 +1,51 @@
-﻿弈鉴 · 2.9 构建信息
+﻿弈鉴 · 2.10 构建信息
 
 包名: com.yijian.xiangqi
-版本: 2.9 (versionCode 25)
+版本: 2.10 (versionCode 26)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-2.9.apk
+APK 文件: Yijian-Xiangqi-2.10.apk
+文件大小: 4351133 bytes
+SHA-256: A6A5C15922BC5EC09FD6EF6C52E39D2C2471FC4A702DDFC92B3488908CCD93E4
+
+上一版: Yijian-Xiangqi-2.9.apk
 文件大小: 4348869 bytes
 SHA-256: 257D2FBE456022524C012421C42E4CF7058707E3BCB22606D9C3A14A1045A81F
 
-上一版: Yijian-Xiangqi-2.8.apk
-文件大小: 4348285 bytes
-SHA-256: D52C7DB22D61EA23F03BBB76A8CE93163EDCFB7CCCEE3AD1A19619FC97ABD591
+本次改动: 新增观战功能（第三者加入不影响对局）
 
-本次改动: 修复 ICE 因 mDNS 候选而无法建连
+背景:
+  原来 net.js 是严格 1 对 1（一个 RTCPeerConnection、一个 DataChannel、一个 state.peer），
+  观战者只能连到房主（房间广播方），所以必须让房主同时维持多条连接。
 
-根因（本机实测确认）:
-  在 http://127.0.0.1 打开页面，window.isSecureContext 为 true，
-  但 Chromium 生成的候选仍然是 mDNS 占位名：
-    candidate:... 474b2e60-...-dee7111923fe.local 60855 typ host
-  对端必须靠组播 DNS 解析这个名字才能拿到真实 IP，而该网络不转发这种组播，
-  于是信令四步都成功、ICE 却始终失败（点对点通道断开 failed）。
-
-修复:
-  1. 收到对端候选时，若报文里是 .local 名字，直接把主机部分替换成
-     对端的真实 IP —— 这个 IP 就是承载该候选的 UDP 包源地址，本来就知道。
-     两端通用（桌面与安卓共用 net.js），绕开 mDNS。
-  2. 桌面版浏览器启动参数追加
-     --disable-features=WebRtcHideLocalIpsWithMdns，让电脑直接给出真实局域网 IP。
-  3. 『房间日志』新增一行"本机候选：…"，可直接看到候选里的地址。
+实现:
+  - net.js 改为多对端：peers 以对端地址为键，房主为每个进来的 offer 建一条独立连接；
+    send() 默认广播给所有已连对端，sendTo(id, msg) 定向发送；setPeerKind 标记身份。
+  - 协议加意图：hello { want: "play" | "spectate" }。
+      玩家 -> welcome { side, name }（与之前一致）
+      观众 -> welcome { role:"spectator", snapshot, elapsedMs, turnMs, redName, blackName }
+      对局席已满时再来玩家 -> welcome { full:true }，客户端提示改用观战
+  - 观众端：mySide / peerSide 均为 null，canPlayNow() 与 canMoveLocally() 恒为 false
+    （点不动棋盘），隐藏「认输 / 重开」，状态显示「观战中（不执棋）」；
+    收到 welcome 时用 snapshot 对齐当前局面与棋谱，时钟按 elapsedMs / turnMs 校准。
+  - 房主把走子 / 聊天 / 重开 / 认输 / 对齐等事件广播给所有对端；观众只收不发。
+  - 房间列表每行改成两个按钮：加入 / 观战。
+  - 房主状态里显示观众人数；日志记录「xxx 加入观战（共 N 人观战）」「观众已连上」「一名观众离开了」。
 
 验证:
-  verify-net 新增两条：mDNS 候选被替换为对端 IP、真实 IP 候选保持原样。
+  verify-net 新增两组用例：
+    * 房主同时接受两名加入者，各自建连接、各自收到应答；
+      广播能同时到达两人；sendTo 只发给指定对端；setPeerKind 区分棋手/观众计数。
+    * 观众无座位、不能走子、能收到running快照（history=1）、时钟按主机校准。
   5 个套件全绿；perft(3) = 79666
   APK 的 assets/public 与 www/ 逐文件哈希一致
   桌面版已重建（重建前需先关闭正在运行的弈鉴）
 
-说明: 基于 2.8 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
+已知限制:
+  - 观战仍需要知道房间地址（走局域网发现或手动输入），与对局一致
+  - 观众数量未设上限
+
+说明: 基于 2.9 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
 产物输出到 fe\outputs。
