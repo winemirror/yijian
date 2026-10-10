@@ -1,0 +1,203 @@
+// Drives the signalling server with real WebSocket clients.
+//
+//   node verify-server.mjs
+//
+// Covers: hello/ice, room create, join as player, join as spectator, the
+// two-player seat limit, opaque signal relay, peer.join/leave notifications,
+// host-leave closing the room, the room list and the /health endpoint.
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { listen, close } from "./server.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+const problems = [];
+const check = (label, ok, detail = "") => {
+  console.log(`  ${ok ? "PASS" : "FAIL"} ${label}${detail ? ` - ${detail}` : ""}`);
+  if (!ok) problems.push(label);
+};
+
+function connect(port) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const queue = [];
+    const waiters = [];
+
+    socket.addEventListener("message", (event) => {
+      let message = null;
+      try {
+        message = JSON.parse(event.data);
+      } catch (error) {
+        return;
+      }
+      const waiter = waiters.shift();
+      if (waiter) waiter.resolve(message);
+      else queue.push(message);
+    });
+    socket.addEventListener("error", () => reject(new Error("websocket error")));
+    socket.addEventListener("open", () => {
+      resolve({
+        socket,
+        send: (message) => socket.send(JSON.stringify(message)),
+        next: (timeoutMs = 2500) => {
+          if (queue.length) return Promise.resolve(queue.shift());
+          return new Promise((res, rej) => {
+            const waiter = { resolve: null };
+            const timer = setTimeout(() => {
+              const index = waiters.indexOf(waiter);
+              if (index >= 0) waiters.splice(index, 1);
+              rej(new Error("timeout waiting for a message"));
+            }, timeoutMs);
+            waiter.resolve = (message) => {
+              clearTimeout(timer);
+              res(message);
+            };
+            waiters.push(waiter);
+          });
+        },
+        close: () => socket.close(),
+      });
+    });
+  });
+}
+
+// 进程内启动：沙箱不允许 Node 起子进程，而且这样测试更快。
+const port = await listen({
+  host: "127.0.0.1",
+  port: 0,
+  stunUrl: "stun:stun.example.test:3478",
+  turnUrl: "turn:turn.example.test:3478",
+  turnSecret: "test-secret",
+});
+
+try {
+  console.log("== 连接与 ICE 配置 ==");
+  const a = await connect(port);
+  a.send({ t: "hello", proto: 1, name: "甲" });
+  const welcome = await a.next();
+  check("hello 收到 welcome", welcome.t === "welcome", welcome.t);
+  check("welcome 带 clientId", typeof welcome.clientId === "string" && welcome.clientId.length > 0);
+  const servers = (welcome.ice && welcome.ice.servers) || [];
+  check("下发 STUN", servers.some((s) => String(s.urls).startsWith("stun:")),
+    JSON.stringify(servers));
+  check("下发 TURN 时带临时凭证",
+    servers.some((s) => String(s.urls).startsWith("turn:") && s.username && s.credential),
+    JSON.stringify(servers.map((s) => s.urls)));
+
+  console.log("== 建房 ==");
+  a.send({ t: "room.create", name: "甲的房间", visibility: "public" });
+  const created = await a.next();
+  check("建房收到 room.joined", created.t === "room.joined", created.t);
+  const code = created.room && created.room.id;
+  check("房间码是 6 位且不含易混字符",
+    typeof code === "string" && /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/.test(code), code);
+  check("建房者是 host", created.room.hostId === welcome.clientId);
+  check("建房者身份是 player", created.self.kind === "player", created.self.kind);
+  check("刚建房时没有其他成员", created.peers.length === 0, String(created.peers.length));
+
+  console.log("== 玩家加入 ==");
+  const b = await connect(port);
+  b.send({ t: "hello", proto: 1, name: "乙" });
+  const welcomeB = await b.next();
+  b.send({ t: "room.join", roomId: code, want: "play" });
+  const joinedB = await b.next();
+  check("乙加入成功", joinedB.t === "room.joined", joinedB.t);
+  check("乙能看到房主", joinedB.peers.length === 1 && joinedB.peers[0].id === welcome.clientId,
+    JSON.stringify(joinedB.peers));
+  const peerJoin = await a.next();
+  check("房主收到 peer.join", peerJoin.t === "peer.join" && peerJoin.peer.id === welcomeB.clientId,
+    JSON.stringify(peerJoin));
+
+  console.log("== 坐满之后的处理 ==");
+  const c = await connect(port);
+  c.send({ t: "hello", proto: 1, name: "丙" });
+  await c.next();
+  c.send({ t: "room.join", roomId: code, want: "play" });
+  const full = await c.next();
+  check("第三名棋手被拒绝", full.t === "error" && full.code === "room_full",
+    JSON.stringify(full));
+  c.send({ t: "room.join", roomId: code, want: "spectate" });
+  const watch = await c.next();
+  check("同一人改为观战可以进", watch.t === "room.joined" && watch.self.kind === "spectator",
+    JSON.stringify(watch.self));
+  // 丙进来时甲和乙各会收到一条 peer.join，先排空再测信令
+  const joinSeenByA = await a.next();
+  const joinSeenByB = await b.next();
+  check("观战者加入会通知房主",
+    joinSeenByA.t === "peer.join" && joinSeenByA.peer.kind === "spectator",
+    JSON.stringify(joinSeenByA));
+  check("观战者加入会通知对手",
+    joinSeenByB.t === "peer.join" && joinSeenByB.peer.kind === "spectator",
+    JSON.stringify(joinSeenByB));
+
+  console.log("== 信令中转 ==");
+  a.send({ t: "signal", to: welcomeB.clientId, data: { t: "offer", sdp: "fake" } });
+  const relayed = await b.next();
+  check("对端收到 signal", relayed.t === "signal", relayed.t);
+  check("转发时带上发送者 id", relayed.from === welcome.clientId, relayed.from);
+  check("data 原样透传（服务端不解析）",
+    relayed.data && relayed.data.t === "offer" && relayed.data.sdp === "fake",
+    JSON.stringify(relayed.data));
+
+  c.send({ t: "signal", to: "nobody", data: { t: "offer" } });
+  const noPeer = await c.next();
+  check("发给不在房间的人会报错", noPeer.t === "error" && noPeer.code === "no_peer",
+    JSON.stringify(noPeer));
+
+  console.log("== 房间列表与健康检查 ==");
+  const d = await connect(port);
+  d.send({ t: "hello", proto: 1 });
+  await d.next();
+  d.send({ t: "room.list" });
+  const list = await d.next();
+  check("公开房间出现在列表里",
+    list.t === "room.list" && list.rooms.some((room) => room.id === code),
+    JSON.stringify(list.rooms));
+  check("列表里带上人数",
+    list.rooms.every((room) => typeof room.players === "number"
+      && typeof room.spectators === "number"),
+    JSON.stringify(list.rooms));
+
+  const health = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json());
+  check("/health 正常", health.ok === true && health.rooms === 1 && health.clients === 4,
+    JSON.stringify(health));
+
+  console.log("== 房主离开 ==");
+  a.send({ t: "room.leave" });
+  const closedB = await b.next();
+  const closedC = await c.next();
+  check("房主离开后房间解散（乙）", closedB.t === "room.closed", JSON.stringify(closedB));
+  check("房主离开后房间解散（丙）", closedC.t === "room.closed", JSON.stringify(closedC));
+
+  const healthAfter = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json());
+  check("房间已从服务端移除", healthAfter.rooms === 0, JSON.stringify(healthAfter));
+
+  console.log("== 健壮性 ==");
+  d.socket.send("not json");
+  const badJson = await d.next();
+  check("非法 JSON 得到错误而不是崩溃", badJson.t === "error" && badJson.code === "bad_json",
+    JSON.stringify(badJson));
+  d.send({ t: "room.join", roomId: "ZZZZZZ" });
+  const noRoom = await d.next();
+  check("加入不存在的房间有明确错误",
+    noRoom.t === "error" && noRoom.code === "no_room", JSON.stringify(noRoom));
+
+  a.close();
+  b.close();
+  c.close();
+  d.close();
+} catch (error) {
+  check("测试流程完成", false, String(error && error.stack || error));
+} finally {
+  await close();
+}
+
+console.log("");
+if (problems.length === 0) {
+  console.log("SERVER CHECKS PASSED");
+  process.exitCode = 0;
+} else {
+  console.log(`PROBLEMS: ${problems.join("; ")}`);
+  process.exitCode = 1;
+}
