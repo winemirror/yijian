@@ -235,6 +235,31 @@ try {
   check("http bridge completed", false, String(error && error.message || error));
 }
 
+console.log("== net.js: mDNS candidates are rewritten to the peer ip ==");
+{
+  const net = loadNet(makeFakeWebRTC(), "mdns");
+  const rewritten = net.__normalizeCandidate(
+    {
+      candidate: "candidate:1 1 udp 2113937151 abc-123.local 60855 typ host",
+      sdpMid: "0",
+      sdpMLineIndex: 0,
+    },
+    "192.168.5.48"
+  );
+  check("mDNS host is replaced by the peer address",
+    rewritten.candidate.indexOf("192.168.5.48") >= 0
+      && rewritten.candidate.indexOf(".local") < 0,
+    rewritten.candidate);
+  const untouched = net.__normalizeCandidate(
+    { candidate: "candidate:1 1 udp 2113937151 192.168.5.31 60855 typ host" },
+    "192.168.5.48"
+  );
+  check("real addresses are left alone",
+    untouched.candidate.indexOf("192.168.5.31") >= 0
+      && untouched.candidate.indexOf("192.168.5.48") < 0,
+    untouched.candidate);
+}
+
 console.log("== net.js: late ICE candidates are buffered ==");
 try {
   const webRTC = makeFakeWebRTC();

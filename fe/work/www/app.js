@@ -4091,6 +4091,9 @@
       case "ice":
         netLog(`收到 ${detail.from || "对方"} 的候选地址`);
         break;
+      case "candidate":
+        netLog("本机候选：" + (detail.text || ""));
+        break;
       case "connected":
         netLog("点对点通道已建立"
           + (typeof detail.ice === "number" ? `（已交换 ${detail.ice} 个候选地址）` : ""));
