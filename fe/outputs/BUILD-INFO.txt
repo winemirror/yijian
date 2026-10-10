@@ -1,43 +1,41 @@
-﻿弈鉴 · 2.8 构建信息
+﻿弈鉴 · 2.9 构建信息
 
 包名: com.yijian.xiangqi
-版本: 2.8 (versionCode 24)
+版本: 2.9 (versionCode 25)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-2.8.apk
+APK 文件: Yijian-Xiangqi-2.9.apk
+文件大小: 4348869 bytes
+SHA-256: 257D2FBE456022524C012421C42E4CF7058707E3BCB22606D9C3A14A1045A81F
+
+上一版: Yijian-Xiangqi-2.8.apk
 文件大小: 4348285 bytes
 SHA-256: D52C7DB22D61EA23F03BBB76A8CE93163EDCFB7CCCEE3AD1A19619FC97ABD591
 
-上一版: Yijian-Xiangqi-2.7.apk
-文件大小: 4355457 bytes
-SHA-256: 6EC9EFAB3289BA978F85B3886CCCCEBFA7A76C31BE46BC29E066C549BA077AF5
+本次改动: 修复 ICE 因 mDNS 候选而无法建连
 
-本次改动: 修复 WebRTC 因 ICE 候选丢失而连接失败
-
-根因:
-  收到 offer 时 setRemoteDescription 是异步的，但同一批轮询里的 ICE 候选是紧接着
-  同步处理的。此时远程描述还没就绪，addIceCandidate 立即 reject，被 catch 静默吞掉，
-  候选就永久丢了 —— 表现为信令正常（"收到 xx 的连接请求"）但 15 秒后
-  "点对点通道断开（failed）"。手机端收到 answer 时同理，而且 onicecandidate 可能
-  先于 answer 发出，候选反而排在 answer 前面。
+根因（本机实测确认）:
+  在 http://127.0.0.1 打开页面，window.isSecureContext 为 true，
+  但 Chromium 生成的候选仍然是 mDNS 占位名：
+    candidate:... 474b2e60-...-dee7111923fe.local 60855 typ host
+  对端必须靠组播 DNS 解析这个名字才能拿到真实 IP，而该网络不转发这种组播，
+  于是信令四步都成功、ICE 却始终失败（点对点通道断开 failed）。
 
 修复:
-  - 增加 pendingIce 缓冲：远程描述就绪前的候选先入队，setRemoteDescription 完成后
-    统一回放（flushPendingIce）
-  - 通道建立时在房间日志里显示交换到的候选数量
-  - 新增日志："已把应答发回 x.x.x.x"、"收到 x.x.x.x 的候选地址"，
-    把"发送应答 / 收到候选"这两步也暴露出来
+  1. 收到对端候选时，若报文里是 .local 名字，直接把主机部分替换成
+     对端的真实 IP —— 这个 IP 就是承载该候选的 UDP 包源地址，本来就知道。
+     两端通用（桌面与安卓共用 net.js），绕开 mDNS。
+  2. 桌面版浏览器启动参数追加
+     --disable-features=WebRtcHideLocalIpsWithMdns，让电脑直接给出真实局域网 IP。
+  3. 『房间日志』新增一行"本机候选：…"，可直接看到候选里的地址。
 
 验证:
-  verify-net 新增一条：伪造的 RTCPeerConnection 在远程描述未就绪时调用
-  addIceCandidate 会记录并 reject；把 offer 与 ice 放在同一批次喂进去，
-  断言没有候选被提前应用、且队列中的候选最终被回放。
-  修复前该用例是红的（lateCandidates=1, applied=0），现在是绿的。
+  verify-net 新增两条：mDNS 候选被替换为对端 IP、真实 IP 候选保持原样。
   5 个套件全绿；perft(3) = 79666
   APK 的 assets/public 与 www/ 逐文件哈希一致
   桌面版已重建（重建前需先关闭正在运行的弈鉴）
 
-说明: 基于 2.7 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
+说明: 基于 2.8 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
 产物输出到 fe\outputs。

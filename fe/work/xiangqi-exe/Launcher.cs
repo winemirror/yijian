@@ -1256,7 +1256,11 @@ internal static class Launcher
     {
         string arguments = string.Format(
             "--app=\"{0}\" --user-data-dir=\"{1}\" --start-maximized "
-                + "--no-first-run --no-default-browser-check --disable-sync",
+                + "--no-first-run --no-default-browser-check --disable-sync "
+                // Without this Chromium hands out an mDNS .local placeholder
+                // instead of the real LAN address, and access points that drop
+                // multicast make the connection impossible.
+                + "--disable-features=WebRtcHideLocalIpsWithMdns",
             url,
             profileRoot
         );

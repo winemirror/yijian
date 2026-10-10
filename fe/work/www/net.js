@@ -320,6 +320,7 @@
   // which left the connection stuck at "failed".
   var pendingIce = [];
   var iceReceived = 0;
+  var localIceLogged = 0;
 
   function emit(list, payload) {
     for (var index = 0; index < list.length; index += 1) {
@@ -400,6 +401,7 @@
   function closePeer() {
     pendingIce = [];
     iceReceived = 0;
+    localIceLogged = 0;
     if (channel) {
       try { channel.close(); } catch (error) { /* already closed */ }
       channel = null;
@@ -413,7 +415,16 @@
   function newPeerConnection() {
     var connection = new scope.RTCPeerConnection({ iceServers: ICE_SERVERS });
     connection.onicecandidate = function (event) {
-      if (event.candidate && state.peer) {
+      if (!event.candidate) return;
+      // Log the first few local candidates: whether they carry a real LAN
+      // address or an mDNS placeholder decides if the peer can reach us.
+      if (localIceLogged < 3) {
+        localIceLogged += 1;
+        emitDebug("candidate", {
+          text: String(event.candidate.candidate || "").slice(0, 110)
+        });
+      }
+      if (state.peer) {
         state.transport.send(state.peer.addr, {
           t: "ice", sdp: event.candidate
         });
@@ -441,6 +452,27 @@
     for (var index = 0; index < queued.length; index += 1) {
       pc.addIceCandidate(queued[index]).catch(function () { /* stale */ });
     }
+  }
+
+  // Chromium hides host candidates behind an mDNS name (.local) even on a
+  // trustworthy localhost origin, and plenty of access points do not forward
+  // the multicast needed to resolve it. The peer's real address is the source
+  // of the UDP packet that carried the candidate, so swap the host part for it
+  // and skip mDNS entirely.
+  function normalizeCandidate(candidate, peerIp) {
+    if (!candidate || !candidate.candidate || !peerIp) return candidate;
+    var text = String(candidate.candidate);
+    if (text.indexOf(".local") < 0) return candidate;
+    var parts = text.split(" ");
+    for (var index = 0; index < parts.length; index += 1) {
+      if (parts[index].indexOf(".local") >= 0) parts[index] = peerIp;
+    }
+    return {
+      candidate: parts.join(" "),
+      sdpMid: candidate.sdpMid,
+      sdpMLineIndex: candidate.sdpMLineIndex,
+      usernameFragment: candidate.usernameFragment
+    };
   }
 
   function attachChannel(connection, isHost) {
@@ -515,11 +547,12 @@
     if (blob.t === "ice" && pc) {
       iceReceived += 1;
       if (iceReceived === 1) emitDebug("ice", { from: addr && addr.ip });
+      var candidate = normalizeCandidate(blob.sdp, addr && addr.ip);
       if (!pc.remoteDescription) {
-        pendingIce.push(blob.sdp);
+        pendingIce.push(candidate);
         return;
       }
-      pc.addIceCandidate(blob.sdp).catch(function () { /* stale candidate */ });
+      pc.addIceCandidate(candidate).catch(function () { /* stale candidate */ });
     }
   }
 
@@ -726,6 +759,7 @@
     },
     __handleBlob: handleBlob,
     __bindChannel: bindChannel,
+    __normalizeCandidate: normalizeCandidate,
     __state: state
   };
 
