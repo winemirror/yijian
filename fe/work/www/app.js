@@ -2471,6 +2471,7 @@
     netSide: document.getElementById("netSide"),
     netHost: document.getElementById("netHost"),
     netRooms: document.getElementById("netRooms"),
+    netSelfTest: document.getElementById("netSelfTest"),
     netRefresh: document.getElementById("netRefresh"),
     netManual: document.getElementById("netManual"),
     netManualJoin: document.getElementById("netManualJoin"),
@@ -4042,6 +4043,33 @@
 
   let lastRoomKey = "";
 
+  // One-click diagnostic: proves whether this device can do UDP at all before
+  // blaming the network.
+  async function netRunSelfTest() {
+    if (!Net || typeof Net.selfTest !== "function") {
+      netLog("当前版本不支持网络自检");
+      return;
+    }
+    netLog("开始网络自检…");
+    try {
+      const result = await Net.selfTest();
+      if (result && result.ok) {
+        netLog(`自检通过：${result.mode || "-"} 通道可收发（本机回环已验证）`);
+      } else {
+        netLog(`自检失败：${(result && result.reason) || "unknown"}`
+          + (result && result.mode ? `（通道 ${result.mode}）` : ""));
+      }
+    } catch (error) {
+      netLog("自检异常：" + defaultTo(error && error.message, "unknown"));
+    }
+    if (typeof Net.status === "function") {
+      const status = Net.status();
+      if (status && status.localIps && status.localIps.length) {
+        netLog("本机局域网地址：" + status.localIps.join(" / "));
+      }
+    }
+  }
+
   function netHandleDebug(event) {
     if (!event || !event.kind) return;
     const detail = event.detail || {};
@@ -4158,6 +4186,9 @@
 
   function netWire() {
     if (elements.netHost) elements.netHost.addEventListener("click", netHost);
+    if (elements.netSelfTest) {
+      elements.netSelfTest.addEventListener("click", netRunSelfTest);
+    }
     if (elements.netRefresh) elements.netRefresh.addEventListener("click", netScan);
     if (elements.netLeave) elements.netLeave.addEventListener("click", netLeave);
     if (elements.netResign) elements.netResign.addEventListener("click", netResign);

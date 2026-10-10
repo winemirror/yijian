@@ -190,6 +190,7 @@ console.log("== net.js: native bridge wins ==");
 console.log("== net.js: capacitor plugin bridge ==");
 try {
   const calls = [];
+  const received = [];
   const plugin = {
     announce(payload) {
       calls.push(["announce", payload]);
@@ -203,10 +204,13 @@ try {
     },
     inbox(payload) {
       calls.push(["inbox", payload]);
-      return Promise.resolve({ cursor: payload.since, blobs: [] });
+      const since = payload.since || 0;
+      return Promise.resolve({ cursor: received.length, blobs: received.slice(since) });
     },
     send(payload) {
       calls.push(["send", payload]);
+      // Emulate the loopback delivery a real UDP socket performs.
+      received.push({ ip: "127.0.0.1", port: 45455, data: payload.data });
       return Promise.resolve({ ok: true });
     },
     status() {
@@ -246,9 +250,40 @@ try {
     calls.some((entry) => entry[0] === "announce" && entry[1].room
       && entry[1].room.id === "room-c"),
     JSON.stringify(calls.map((entry) => entry[0])));
+
+  const selfResult = await net.selfTest();
+  check("loopback self test passes when the bridge echoes", selfResult.ok === true,
+    JSON.stringify(selfResult));
   net.leave();
 } catch (error) {
   check("capacitor bridge completed", false, String(error && error.message || error));
+}
+
+console.log("== net.js: native bridge fallback ==");
+try {
+  const calls = [];
+  const capacitor = {
+    // Deliberately no Capacitor.Plugins.YiJianLan: a pure native plugin is not
+    // always mirrored there, so net.js has to use the low level bridge.
+    nativePromise(pluginName, method, options) {
+      calls.push([pluginName, method]);
+      if (method === "status") {
+        return Promise.resolve({ ok: true, proto: 1, ips: ["192.168.5.46"] });
+      }
+      if (method === "rooms") return Promise.resolve({ rooms: [] });
+      if (method === "inbox") return Promise.resolve({ cursor: 0, blobs: [] });
+      return Promise.resolve({ ok: true });
+    },
+  };
+  const net = loadNet(null, "capacitor-fallback", { Capacitor: capacitor });
+  const status = await net.ready();
+  check("falls back to Capacitor.nativePromise", status.mode === "native", status.mode);
+  check("fallback talks to the YiJianLan plugin",
+    calls.some((entry) => entry[0] === "YiJianLan"), JSON.stringify(calls.slice(0, 3)));
+  check("fallback still surfaces local addresses",
+    status.localIps.indexOf("192.168.5.46") >= 0, JSON.stringify(status.localIps));
+} catch (error) {
+  check("native bridge fallback completed", false, String(error && error.message || error));
 }
 
 console.log("== net.js: two peers complete a handshake ==");
