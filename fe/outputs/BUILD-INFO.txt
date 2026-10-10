@@ -1,41 +1,63 @@
-﻿弈鉴 · 2.12 构建信息
+﻿弈鉴 · 3.0 构建信息
 
 包名: com.yijian.xiangqi
-版本: 2.12 (versionCode 28)
+版本: 3.0 (versionCode 29)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-2.12.apk
+APK 文件: Yijian-Xiangqi-3.0.apk
+文件大小: 4356229 bytes
+SHA-256: BE5D3FDD79D3CE1DC86040232E97C79F528FBEEA1791ACB2D0BEE4EF64BF90B7
+
+上一版: Yijian-Xiangqi-2.12.apk
 文件大小: 4351745 bytes
 SHA-256: 0BAFECF9B53E3FE5A3E46DB91E6E08B0B1D9E1109C32BCE166A0D8073939EFDA
 
-上一版: Yijian-Xiangqi-2.11.apk
-文件大小: 4351489 bytes
-SHA-256: 1E3695EF43C0E62A16784C530298FEA1432278B7D501399BB2A72A3EB1124938
+本次改动: 服务器中转联机（3.0 第一阶段：服务端 + 客户端接入）
 
-本次改动:
-  1. 悔棋不再询问观众
-     之前 undoReq 是广播的（再经房主转发），观众也会收到并弹出"是否同意悔棋"，
-     而且还会代替对手回复。
-     现在：undoReq / undoNo 不再进入房主转发列表（只有 undoOk 是局面变化需要转发）；
-     观众收到 undoReq 直接忽略，不弹框也不回复。
-     双方同意后（undoOk），观众把自己的棋盘一并回退，保持与对局同步。
-  2. 联机时禁用「自动下一步」
-     该功能会让引擎替本地玩家落子，在联机里等于替你下棋。
-     现在联机期间按钮禁用、点击也会提示"联机对局不使用自动下一步"；
-     离开房间后按钮自动恢复。同时移除了 playAIMoveOnce 里那条联机发送的代码
-     （该路径已不可达）。
+服务端（fe/work/server/，零依赖）:
+  - server.mjs       信令与房间服务：房间登记（6 位房间码）、信令中转
+                     （offer/answer/ice 原样透传，不解析）、下发 ICE 配置
+  - verify-server.mjs 24 项断言，用真实 WebSocket 客户端跑
+  - coturn.conf      STUN/TURN 配置示例（3.0 只用到 STUN）
+  - deploy.sh        在 VPS 上一键安装 systemd 服务 + 自检
+  - README.md        协议、环境变量、Caddy/端口/部署清单
+  WebSocket 按 RFC 6455 自己实现，服务器上不需要 npm install。
+
+客户端（www/net.js）:
+  - 新增 wsTransport：信令走 WebSocket 到服务器（推送式，不再长轮询）
+  - ICE 配置改为服务端下发（之前写死为 []）；STUN 是公网联机的硬前提
+  - mDNS 候选改写只在局域网启用（服务器模式靠 STUN 的 srflx）
+  - setServer / setLan 两种模式互斥切换
+  - joinByCode：按房间码加入，所有人（含观众）都连房主
+  - 房主不再每 1.5 秒重复 announce（否则会在服务端每 1.5 秒建一个新房间）
+
+界面（www/app.js + index.html）:
+  - 联机页新增「连接方式：局域网 / 服务器」+ 服务器地址（存 localStorage）
+  - 服务器模式：隐藏局域网房间列表与手动 IP，改为房间码输入 + 加入 / 观战
+  - 建房成功后日志打出「房间码 XXXXXX —— 发给对手即可加入」
 
 验证:
-  verify-net 新增四条：
-    * 观众收到 undoReq 时不回复（sent 为空）
-    * 观众收到 undoOk 时把棋盘回退（before=1 -> after=0）
-    * 联机中「自动下一步」按钮为禁用
-    * 离开房间后按钮恢复可用
-  5 个套件全绿；perft(3) = 79666
-  APK 的 assets/public 与 www/ 逐文件哈希一致
-  桌面版已重建（重建前需先关闭正在运行的弈鉴）
+  verify-server：24 项全过（ICE 下发、建房、玩家加入、座位已满、改观战、
+    信令透传、房间列表、/health、房主离开解散、非法 JSON、不存在房间）
+  verify-net 新增：两个 net.js 实例经真实信令服务端完成完整握手 ——
+    拿到 6 位房间码、offer 到房主、应答回到加入方、RTCPeerConnection 用上
+    服务端下发的 STUN、两端 connected、棋局消息仍走 DataChannel（不经过服务端）
+  既有 5 个套件全绿；perft(3) = 79666
+  桌面版已重建
 
-说明: 基于 2.11 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
+部署状态:
+  **尚未部署**。沙箱在 PATH 最前面放了 ssh/scp 拒绝垫片（C:\Users\su\.sbx-denybin），
+  本会话又没有申请权限的工具，因此无法从沙箱登录 VPS。
+  部署请用 fe/work/server/deploy.sh（见 README.md 的部署章节）。
+
+已知限制（3.0）:
+  - 没有 TURN：家用宽带之间多数能直连；两端都在手机流量上（国内运营商 CGNAT）
+    失败率明显偏高；企业网/校园网经常不通。接口已留，加 TURN 只改服务端。
+  - 公网必须 wss://：安卓端 https://localhost、桌面端 http://127.0.0.1 都是
+    安全上下文，ws:// 会被浏览器按混合内容拦掉。
+  - 服务端不存棋局，重启会让在线房间失效（客户端重连重建即可）。
+
+说明: 基于 2.12 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
 产物输出到 fe\outputs。
