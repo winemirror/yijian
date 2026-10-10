@@ -449,6 +449,53 @@ try {
 
 // ---------------------------------------------------------------------- part B
 
+console.log("== net.js: host serves an opponent and a spectator ==");
+try {
+  const webRTC = makeFakeWebRTC();
+  const host = loadNet(webRTC, "multi-host");
+  await host.ready();
+  await host.hostRoom({ id: "room-multi", name: "多端" });
+  await tick(20);
+
+  const playerAddr = { ip: "10.0.0.7", port: 45455 };
+  const spectatorAddr = { ip: "10.0.0.8", port: 45455 };
+  host.__handleBlob(playerAddr, { t: "offer", sdp: "offer-a", name: "棋手" });
+  host.__handleBlob(spectatorAddr, { t: "offer", sdp: "offer-b", name: "观众" });
+  await tick(50);
+
+  const answered = webRTC.all.filter((pc) => pc.remoteDescription);
+  check("the host keeps one connection per joiner", answered.length === 2,
+    String(answered.length));
+  check("every connection got its own answer",
+    answered.every((pc) => pc.localDescription
+      && pc.localDescription.type === "answer"));
+
+  const received = [];
+  answered.forEach((pc, index) => {
+    const sink = {};
+    sink.onmessage = (event) => received.push({ index: index, data: event.data });
+    pc.channel.peer = sink;
+    pc.channel.open();
+  });
+  check("host reports connected once the channels open",
+    host.status().phase === "connected", host.status().phase);
+
+  host.send({ t: "move", from: 1, to: 2 });
+  check("a game event is broadcast to every peer", received.length === 2,
+    JSON.stringify(received.length));
+  check("sendTo targets a single peer",
+    host.sendTo("10.0.0.8:45455", { t: "chat", text: "hi" }) === true
+      && received.length === 3,
+    JSON.stringify(received.length));
+
+  const counts = host.setPeerKind("10.0.0.8:45455", "spectator").peers;
+  check("a spectator is counted separately",
+    counts.spectators === 1 && counts.players === 1, JSON.stringify(counts));
+  host.leave();
+} catch (error) {
+  check("host multi-peer completed", false, String(error && error.message || error));
+}
+
 console.log("== app.js: game protocol ==");
 try {
   const sent = [];
@@ -563,6 +610,34 @@ try {
   check("net: black may move even though the select still reads AI",
     engine.state.game.sideToMove === BLACK && engine.canPlayNow() === true,
     `side=${engine.state.game.sideToMove} control=${engine.state.control[BLACK]}`);
+
+  // Spectator: no seat, no input, but the board follows the host.
+  engine.reset();
+  engine.state.net.role = "guest";
+  engine.state.net.want = "spectate";
+  engine.state.game.play(60, 51);
+  const midGame = engine.state.game.snapshot();
+  engine.netHandleMessage({
+    t: "welcome",
+    role: "spectator",
+    name: "房主",
+    redName: "甲",
+    blackName: "乙",
+    snapshot: midGame,
+    elapsedMs: 5000,
+    turnMs: 1000,
+  });
+  check("spectator holds no seat",
+    engine.state.net.spectating === true && engine.state.net.mySide === null,
+    `spectating=${engine.state.net.spectating} mySide=${engine.state.net.mySide}`);
+  check("spectator cannot move",
+    engine.canPlayNow() === false && engine.canMoveLocally() === false);
+  check("spectator receives the running snapshot",
+    engine.state.game.history.length === 1,
+    `history=${engine.state.game.history.length}`);
+  check("spectator clock follows the host",
+    Date.now() - engine.state.startedAt >= 4900,
+    String(Date.now() - engine.state.startedAt));
 
   engine.netLeave();
   check("leaving clears the session", engine.netActive() === false);

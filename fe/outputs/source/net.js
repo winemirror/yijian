@@ -313,13 +313,10 @@
   var announceTimer = null;
   var pollTimer = null;
   var pollCursor = 0;
-  var pc = null;
-  var channel = null;
-  // Candidates that arrived before the remote description was ready. Without
-  // this buffer they were rejected by addIceCandidate and silently dropped,
-  // which left the connection stuck at "failed".
-  var pendingIce = [];
-  var iceReceived = 0;
+  // One entry per connected peer. A guest keeps a single entry (the room's
+  // owner); the host keeps one for the opponent plus one for every spectator,
+  // which is what lets a third device watch without disturbing the game.
+  var peers = Object.create(null);
   var localIceLogged = 0;
 
   function emit(list, payload) {
@@ -358,6 +355,7 @@
       phase: state.phase,
       room: state.room,
       peer: state.peer,
+      peers: peerCounts(),
       error: state.error,
       localIps: state.localIps.slice()
     };
@@ -398,21 +396,73 @@
 
   // ------------------------------------------------------------ WebRTC plumbing
 
-  function closePeer() {
-    pendingIce = [];
-    iceReceived = 0;
-    localIceLogged = 0;
-    if (channel) {
-      try { channel.close(); } catch (error) { /* already closed */ }
-      channel = null;
-    }
-    if (pc) {
-      try { pc.close(); } catch (error) { /* already closed */ }
-      pc = null;
+  function peerKeyFor(addr) {
+    if (!addr) return "";
+    return String(addr.ip || addr.id || "") + ":" + (addr.port || 0);
+  }
+
+  function peerFor(addr) {
+    return peers[peerKeyFor(addr)] || null;
+  }
+
+  function eachPeer(callback) {
+    var keys = Object.keys(peers);
+    for (var index = 0; index < keys.length; index += 1) {
+      callback(peers[keys[index]], keys[index]);
     }
   }
 
-  function newPeerConnection() {
+  // The "primary" peer is the opponent: what the status line and the UI show.
+  function primaryPeer() {
+    var fallback = null;
+    var player = null;
+    eachPeer(function (peer) {
+      if (!fallback) fallback = peer;
+      if (!player && peer.kind === "player") player = peer;
+    });
+    return player || fallback;
+  }
+
+  function publicPeer(peer) {
+    if (!peer) return null;
+    return { id: peer.key, name: peer.name, kind: peer.kind };
+  }
+
+  function peerCounts() {
+    var players = 0;
+    var spectators = 0;
+    eachPeer(function (peer) {
+      if (peer.kind === "spectator") spectators += 1;
+      else if (peer.kind === "player") players += 1;
+    });
+    return { players: players, spectators: spectators };
+  }
+
+  function dropPeer(key) {
+    var peer = peers[key];
+    if (!peer) return;
+    delete peers[key];
+    try { if (peer.channel) peer.channel.close(); } catch (error) { /* gone */ }
+    try { if (peer.pc) peer.pc.close(); } catch (error) { /* gone */ }
+    state.peer = publicPeer(primaryPeer());
+    emitDebug("left", { kind: peer.kind, peers: peerCounts() });
+    if (!Object.keys(peers).length && state.phase === "connected") {
+      state.phase = state.room && state.room.role === "host" ? "announcing" : "connecting";
+    }
+    pushStatus();
+  }
+
+  function closePeers() {
+    eachPeer(function (peer) {
+      try { if (peer.channel) peer.channel.close(); } catch (error) { /* gone */ }
+      try { if (peer.pc) peer.pc.close(); } catch (error) { /* gone */ }
+    });
+    peers = Object.create(null);
+    state.peer = null;
+    localIceLogged = 0;
+  }
+
+  function newPeerConnection(peer) {
     var connection = new scope.RTCPeerConnection({ iceServers: ICE_SERVERS });
     connection.onicecandidate = function (event) {
       if (!event.candidate) return;
@@ -424,33 +474,27 @@
           text: String(event.candidate.candidate || "").slice(0, 110)
         });
       }
-      if (state.peer) {
-        state.transport.send(state.peer.addr, {
-          t: "ice", sdp: event.candidate
-        });
+      if (peer.addr) {
+        state.transport.send(peer.addr, { t: "ice", sdp: event.candidate });
       }
     };
     connection.onconnectionstatechange = function () {
       if (connection.connectionState === "failed"
         || connection.connectionState === "disconnected") {
-        state.peer = null;
-        emitDebug("disconnected", connection.connectionState);
-        state.phase = state.room && state.room.role === "host"
-          ? "announcing"
-          : (state.room ? "connecting" : "idle");
-        pushStatus();
+        emitDebug("disconnected", { kind: peer.kind });
+        dropPeer(peer.key);
       }
     };
     return connection;
   }
 
   // Replay any candidates that arrived ahead of the remote description.
-  function flushPendingIce() {
-    if (!pc || !pc.remoteDescription) return;
-    var queued = pendingIce;
-    pendingIce = [];
+  function flushPendingIce(peer) {
+    if (!peer || !peer.pc || !peer.pc.remoteDescription) return;
+    var queued = peer.pendingIce;
+    peer.pendingIce = [];
     for (var index = 0; index < queued.length; index += 1) {
-      pc.addIceCandidate(queued[index]).catch(function () { /* stale */ });
+      peer.pc.addIceCandidate(queued[index]).catch(function () { /* stale */ });
     }
   }
 
@@ -475,32 +519,34 @@
     };
   }
 
-  function attachChannel(connection, isHost) {
+  function attachChannel(peer, connection, isHost) {
     if (isHost) {
-      connection.ondatachannel = function (event) { bindChannel(event.channel); };
+      connection.ondatachannel = function (event) {
+        bindChannel(peer, event.channel);
+      };
     } else {
-      bindChannel(connection.createDataChannel("yijian", { ordered: true }));
+      bindChannel(peer, connection.createDataChannel("yijian", { ordered: true }));
     }
   }
 
-  function bindChannel(dataChannel) {
-    channel = dataChannel;
-    channel.onopen = function () {
+  function bindChannel(peer, dataChannel) {
+    peer.channel = dataChannel;
+    dataChannel.onopen = function () {
       state.phase = "connected";
-      emitDebug("connected", { ice: iceReceived });
+      emitDebug("connected", { kind: peer.kind, peers: peerCounts() });
       pushStatus();
     };
-    channel.onclose = function () {
-      emitDebug("closed", null);
-      if (state.phase === "connected") {
-        state.phase = state.room ? "announcing" : "idle";
-        pushStatus();
-      }
+    dataChannel.onclose = function () {
+      emitDebug("closed", { kind: peer.kind });
+      dropPeer(peer.key);
     };
-    channel.onmessage = function (event) {
+    dataChannel.onmessage = function (event) {
       var message = null;
       try { message = JSON.parse(event.data); } catch (error) { return; }
-      if (message) emit(listeners.message, message);
+      if (!message) return;
+      for (var index = 0; index < listeners.message.length; index += 1) {
+        try { listeners.message[index](message, publicPeer(peer)); } catch (error) { /* */ }
+      }
     };
   }
 
@@ -513,19 +559,37 @@
         fail("offer 缺少 sdp（数据可能在传输中损坏）");
         return;
       }
-      state.peer = { addr: addr, name: blob.name || "" };
+      var key = peerKeyFor(addr);
+      var previous = peers[key];
+      if (previous) {
+        try { if (previous.channel) previous.channel.close(); } catch (error) { /* */ }
+        try { if (previous.pc) previous.pc.close(); } catch (error) { /* */ }
+        delete peers[key];
+      }
+      // Every arrival gets its own connection, so spectators stack up next to
+      // the opponent instead of taking the game over.
+      var peer = {
+        key: key,
+        addr: addr,
+        name: blob.name || "",
+        kind: "player",
+        pc: null,
+        channel: null,
+        pendingIce: []
+      };
+      peers[key] = peer;
+      state.peer = publicPeer(primaryPeer());
       state.phase = "connecting";
       pushStatus();
-      closePeer();
-      pc = newPeerConnection();
-      attachChannel(pc, true);
-      pc.setRemoteDescription({ type: "offer", sdp: blob.sdp })
-        .then(function () { flushPendingIce(); })
-        .then(function () { return pc.createAnswer(); })
-        .then(function (answer) { return pc.setLocalDescription(answer); })
+      peer.pc = newPeerConnection(peer);
+      attachChannel(peer, peer.pc, true);
+      peer.pc.setRemoteDescription({ type: "offer", sdp: blob.sdp })
+        .then(function () { flushPendingIce(peer); })
+        .then(function () { return peer.pc.createAnswer(); })
+        .then(function (answer) { return peer.pc.setLocalDescription(answer); })
         .then(function () {
           state.transport.send(addr, {
-            t: "answer", sdp: pc.localDescription.sdp, name: state.room.name
+            t: "answer", sdp: peer.pc.localDescription.sdp, name: state.room.name
           });
           emitDebug("answer", { ip: addr.ip, port: addr.port });
         })
@@ -533,26 +597,30 @@
       return;
     }
 
-    if (blob.t === "answer" && pc && state.room && state.room.role === "guest") {
+    if (blob.t === "answer" && state.room && state.room.role === "guest") {
       if (!blob.sdp) {
         fail("answer 缺少 sdp（数据可能在传输中损坏）");
         return;
       }
-      pc.setRemoteDescription({ type: "answer", sdp: blob.sdp })
-        .then(function () { flushPendingIce(); })
+      var hostPeer = peerFor(addr) || primaryPeer();
+      if (!hostPeer || !hostPeer.pc) return;
+      hostPeer.pc.setRemoteDescription({ type: "answer", sdp: blob.sdp })
+        .then(function () { flushPendingIce(hostPeer); })
         .catch(function (error) { fail(describe(error)); });
       return;
     }
 
-    if (blob.t === "ice" && pc) {
-      iceReceived += 1;
-      if (iceReceived === 1) emitDebug("ice", { from: addr && addr.ip });
+    if (blob.t === "ice") {
+      var target = peerFor(addr);
+      if (!target || !target.pc) return;
+      target.iceCount = (target.iceCount || 0) + 1;
+      if (target.iceCount === 1) emitDebug("ice", { from: addr && addr.ip });
       var candidate = normalizeCandidate(blob.sdp, addr && addr.ip);
-      if (!pc.remoteDescription) {
-        pendingIce.push(candidate);
+      if (!target.pc.remoteDescription) {
+        target.pendingIce.push(candidate);
         return;
       }
-      pc.addIceCandidate(candidate).catch(function () { /* stale candidate */ });
+      target.pc.addIceCandidate(candidate).catch(function () { /* stale */ });
     }
   }
 
@@ -637,9 +705,8 @@
           fail("no-transport");
           return status();
         }
-        closePeer();
+        closePeers();
         state.room = room;
-        state.peer = null;
         state.phase = "announcing";
         state.error = "";
         if (state.transport.onBlob) state.transport.onBlob(handleBlob);
@@ -665,22 +732,33 @@
           fail("no-webrtc");
           return status();
         }
-        closePeer();
+        closePeers();
         state.room = { id: target.id, name: target.name, role: "guest" };
-        state.peer = { addr: target.addr, name: (options && options.name) || "" };
         state.phase = "connecting";
         state.error = "";
         if (state.transport.onBlob) state.transport.onBlob(handleBlob);
         emitDebug("offer", target.addr);
-        pc = newPeerConnection();
-        attachChannel(pc, false);
+        var key = peerKeyFor(target.addr);
+        var peer = {
+          key: key,
+          addr: target.addr,
+          name: (options && options.name) || "",
+          kind: "player",
+          pc: null,
+          channel: null,
+          pendingIce: []
+        };
+        peers[key] = peer;
+        state.peer = publicPeer(peer);
+        peer.pc = newPeerConnection(peer);
+        attachChannel(peer, peer.pc, false);
         startPolling();
-        return pc.createOffer()
-          .then(function (offer) { return pc.setLocalDescription(offer); })
+        return peer.pc.createOffer()
+          .then(function (offer) { return peer.pc.setLocalDescription(offer); })
           .then(function () {
             return state.transport.send(target.addr, {
               t: "offer",
-              sdp: pc.localDescription.sdp,
+              sdp: peer.pc.localDescription.sdp,
               name: (options && options.name) || ""
             });
           })
@@ -728,14 +806,34 @@
       });
     },
 
-    send: function (message) {
-      if (!channel || channel.readyState !== "open") return false;
-      try {
-        channel.send(JSON.stringify(message));
-        return true;
-      } catch (error) {
-        return false;
+    // Broadcasts to every open peer, or to a single one when an id is given.
+    // The host uses this to fan game events out to the opponent and to every
+    // spectator.
+    send: function (message, peerId) {
+      var sent = false;
+      eachPeer(function (peer) {
+        if (peerId && peer.key !== peerId) return;
+        if (!peer.channel || peer.channel.readyState !== "open") return;
+        try {
+          peer.channel.send(JSON.stringify(message));
+          sent = true;
+        } catch (error) { /* that peer is gone */ }
+      });
+      return sent;
+    },
+
+    sendTo: function (peerId, message) {
+      return api.send(message, peerId);
+    },
+
+    // The app marks a peer as "player" or "spectator" once the hello arrives.
+    setPeerKind: function (peerId, kind) {
+      var peer = peers[peerId];
+      if (peer) {
+        peer.kind = kind === "spectator" ? "spectator" : "player";
+        state.peer = publicPeer(primaryPeer());
       }
+      return status();
     },
 
     leave: function () {
@@ -743,9 +841,8 @@
       announceTimer = null;
       stopPolling();
       if (state.transport && state.room) state.transport.stopAnnounce(state.room);
-      closePeer();
+      closePeers();
       state.room = null;
-      state.peer = null;
       state.phase = "idle";
       state.error = "";
       pushStatus();
