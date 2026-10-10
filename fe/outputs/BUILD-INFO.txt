@@ -1,41 +1,48 @@
-﻿弈鉴 · 2.6 构建信息
+﻿弈鉴 · 2.7 构建信息
 
 包名: com.yijian.xiangqi
-版本: 2.6 (versionCode 22)
+版本: 2.7 (versionCode 23)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-2.6.apk
+APK 文件: Yijian-Xiangqi-2.7.apk
+文件大小: 4355457 bytes
+SHA-256: 6EC9EFAB3289BA978F85B3886CCCCEBFA7A76C31BE46BC29E066C549BA077AF5
+
+上一版: Yijian-Xiangqi-2.6.apk
 文件大小: 4347701 bytes
 SHA-256: 8E435FC9F591455489FF7BC8463DEA678A5614528FF7426C064B6D62B6E46777
 
-上一版: Yijian-Xiangqi-2.5.apk
-文件大小: 4347625 bytes
-SHA-256: 4A1C07FB1ECF57128E1C6B05C0E7E78C767F16BF5D4DE479ED8EB7887E116574
+本次改动: 修复"电脑与手机无法联机"的真正根因
 
-本次改动:
-  1. 修复「点网络自检没反应」
-     「房间日志」原本放在 #netActive 里，而 #netActive 只有进房间后才显示，
-     所以不进房间时所有日志（含自检结果）都写进了隐藏元素。
-     已把日志移到面板层级，任何时候都可见。
-  2. 构建脚本防呆：csc 编译失败（通常是 exe 正被运行占用）以前会静默继续并
-     留下旧 exe，现在会直接抛错。
+根因:
+  net.js 的桌面 HTTP 通道里，base 是 "lan/"，而各方法传的是 "/lan/inbox" 这样的
+  绝对路径，拼出来是 "lan//lan/inbox"，C# 路由匹配不到就返回 404。
+  结果桌面版页面调用 C# 的每一个请求全部 404：
+    /lan/announce 404  -> 电脑其实从未广播过房间
+    /lan/rooms    404  -> 电脑看不到任何房间
+    /lan/inbox    404  -> 电脑收不到手机发来的连接请求，永远不会应答
+    /lan/send     404  -> 电脑发不出应答
+  手机 ↔ 手机走的是原生插件、不经过这条 HTTP 通道，所以一直正常。
+  现象（手机看不到电脑房间、手工输 IP 也连不上）由此全部解释。
 
-附：本轮在电脑上的排查结论（供后续定位）
-  - Windows 防火墙三个配置全 OFF
-  - 电脑活动网卡只有 WLAN 2 = 192.168.5.31/24，子网广播 192.168.5.255
-  - 实测电脑端三条入站路径全部正常：回环单播 / 局域网单播 / 局域网广播，
-    UDP 45455 都能收到并进 inbox
-  - 实测电脑端广播发出正常（每 1.5 秒，24 秒 48 包）
-  - 手机 ↔ 手机 局域网联机正常
-  => 两端各自都正常，问题在电脑与手机之间的链路（疑似 SSID/频段不同导致的
-     客户端隔离，或电脑上的 Clash TUN 劫持局域网 UDP）
+修复:
+  - httpTransport 内所有路径改为相对形式（send / announce / inbox / rooms），
+    不再自己带 "/lan/" 前缀
+  - poll 增加 waitMs 参数：网络自检用 wait=0，不再卡 25 秒长轮询
+  - 「房间日志」移出 #netActive，未进房间时也可见（否则自检结果写进隐藏元素）
+  - build.ps1 编译失败时抛错，避免静默留下旧 exe
 
 验证:
-  5 个套件全绿；perft(3) = 79666
-  APK 的 assets/public 与 www/ 逐文件哈希一致
-  桌面版已重建（注意：重建前必须先关闭正在运行的弈鉴，否则文件被占用）
+  - 端到端实测（桌面版真实运行 + 浏览器操作）：
+      开始网络自检… -> 自检通过：http 通道可收发（本机回环已验证）
+      正在广播房间「我的棋局」/ 正在广播房间，我方执红
+  - verify-net 新增一条：http 通道产生的 URL 必须是 lan/hello、lan/rooms、
+    lan/announce、lan/send、lan/inbox?…，出现 "//" 或非 lan/ 前缀即失败
+  - 5 个套件全绿；perft(3) = 79666
+  - APK 的 assets/public 与 www/ 逐文件哈希一致
+  - 桌面版已重建（重建前需先关闭正在运行的弈鉴）
 
 说明: 基于 2.4 继续叠加。本会话对 w-2 目录只有读权限，改动落在 fe\work 工作副本，
 产物输出到 fe\outputs。
