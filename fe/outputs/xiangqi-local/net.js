@@ -215,7 +215,17 @@
   // session code never needs to know which shell it runs in.
   function capacitorLan(capacitor) {
     var plugin = capacitor && capacitor.Plugins && capacitor.Plugins.YiJianLan;
-    if (!plugin) return null;
+    if (!plugin) {
+      // A native-only plugin is not always mirrored into Capacitor.Plugins, so
+      // fall back to calling the bridge directly.
+      if (!capacitor || typeof capacitor.nativePromise !== "function") return null;
+      plugin = {};
+      ["announce", "rooms", "send", "inbox", "status"].forEach(function (method) {
+        plugin[method] = function (options) {
+          return capacitor.nativePromise("YiJianLan", method, options || {});
+        };
+      });
+    }
     return {
       announce: function (room) { return plugin.announce({ room: room }); },
       stopAnnounce: function () { return plugin.announce({ stop: true }); },
@@ -619,6 +629,38 @@
             fail(describe(error));
             return status();
           });
+      });
+    },
+
+    // Loopback probe: send a packet to ourselves and check it comes back
+    // through the inbox. Separates "this device cannot do UDP at all" from
+    // "the other device is unreachable".
+    selfTest: function () {
+      return api.ready().then(function () {
+        if (!state.transport) return { ok: false, reason: "no-transport", mode: null };
+        var token = "selftest-" + randomId();
+        var from = 0;
+        return Promise.resolve(state.transport.poll(0)).then(function (result) {
+          from = result && typeof result.cursor === "number" ? result.cursor : 0;
+          return state.transport.send(
+            { ip: "127.0.0.1", port: 0, id: "127.0.0.1" },
+            { t: "selftest", token: token }
+          );
+        }).then(function () {
+          return new Promise(function (resolve) { scope.setTimeout(resolve, 500); });
+        }).then(function () {
+          return Promise.resolve(state.transport.poll(from));
+        }).then(function (result) {
+          var blobs = (result && result.blobs) || [];
+          for (var index = 0; index < blobs.length; index += 1) {
+            if (blobs[index].data && blobs[index].data.token === token) {
+              return { ok: true, reason: "", mode: state.mode };
+            }
+          }
+          return { ok: false, reason: "loopback-failed", mode: state.mode };
+        });
+      }).catch(function (error) {
+        return { ok: false, reason: describe(error), mode: state.mode };
       });
     },
 
