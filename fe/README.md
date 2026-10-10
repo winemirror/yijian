@@ -1,0 +1,520 @@
+# 弈鉴 YiJian · 本地中国象棋
+
+一个完全离线运行的中国象棋程序：引擎、界面、棋力分析、音效、局域网联机全部跑在本地，
+同一份网页源码同时产出**浏览器离线版**、**Windows 便携 EXE** 和 **Android APK**。
+
+| | |
+|---|---|
+| 当前版本 | 3.1（versionCode 30） |
+| 运行形态 | 浏览器离线版 / Windows 便携 EXE / Android APK |
+| 前端 | 原生 JavaScript，零框架、零构建步骤 |
+| 服务端 | Node.js，零依赖（WebSocket 按 RFC 6455 手写） |
+| 联机 | 局域网 UDP 广播 + WebRTC 数据通道；公网走自建信令 + STUN |
+| 最低 Android | 7.0（API 24），目标 API 36 |
+
+---
+
+## 1. 目录结构
+
+```
+fe/
+├─ work/                        开发工作副本
+│  ├─ www/                      前端源码（唯一真源）
+│  │  ├─ index.html             页面骨架 + 低版本浏览器兼容兜底
+│  │  ├─ styles.css             全部样式，含内嵌字体与棋子/动效定义
+│  │  ├─ app.js                 规则 + 引擎 + 界面 + 分析（约 4600 行）
+│  │  ├─ net.js                 传输层：局域网 / 服务器信令 / 数据通道
+│  │  ├─ ai-data.js             开局库、残局知识、内联音效
+│  │  └─ ai-worker-bootstrap.js Worker 引导脚本
+│  ├─ server/                   信令与房间服务（可独立部署）
+│  ├─ xiangqi-exe/              Windows 启动器（C#，单文件 EXE）
+│  ├─ android/                  Capacitor 工程 + 局域网原生插件
+│  ├─ sfx/                      音效素材与打包脚本
+│  ├─ harness.mjs               无头引擎测试/基准框架
+│  ├─ verify-*.mjs              六个验证套件
+│  └─ serve.mjs                 本地预览用的静态服务器
+└─ outputs/                     发布物
+   ├─ Yijian-Xiangqi-<版本>.apk
+   ├─ YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+   ├─ xiangqi-local/            EXE 内嵌资源的来源副本
+   ├─ sfx/                      音效候选与试听页
+   └─ BUILD-INFO.txt            每版构建信息（大小、哈希、变更）
+```
+
+`w-2/` 是更早的工作区（1.0–1.8），只作为只读参考保留；**所有改动都落在 `fe/`**。
+
+---
+
+## 2. 架构与数据流
+
+```
+                    ┌──────────────── app.js（页面主线程）────────────────┐
+   UI 事件 ───────▶ │ 棋局模型 XiangqiGame ◀──▶ 着法生成 / 胜负判定        │
+                    │        │                                            │
+                    │        ├──▶ 引擎搜索（本线程回退实现）               │
+                    │        └──▶ EngineWorkerPool ──▶ Web Worker × N     │
+                    │                    （分片并行根节点搜索）             │
+                    │ 分析结果 ─▶ 赢面曲线 / 着法评级 / 棋谱列表            │
+                    └───────────────┬─────────────────────────────────────┘
+                                    │ JSON 消息
+                    ┌───────────────▼──────────── net.js ─────────────────┐
+                    │ 传输链（按可用性依次回退）                            │
+                    │   1. native  Android 插件 / 未来的外壳桥             │
+                    │   2. http    桌面启动器的 /lan/* 端点                │
+                    │   3. server  WebSocket 信令服务器                    │
+                    │   4. tab     BroadcastChannel（同机多窗口 / 测试）    │
+                    │ 之上的会话层：房间、座位、观战、走子同步、悔棋握手     │
+                    └──────────────────────────────────────────────────────┘
+```
+
+关键设计：**传输层只搬运不透明消息**。看棋、走子、悔棋、观战这些语义都在 `app.js`，
+`net.js` 不理解棋盘，服务端也不理解——它只转发 `offer/answer/ice`。
+
+---
+
+## 3. 功能实现细节
+
+### 3.1 棋局模型与规则
+
+棋盘是长度 90 的一维数组，`index = 行 × 9 + 列`；第 0 行在**上方（黑方底线）**，
+第 9 行是红方底线。红方在下、先手。
+
+- **着法生成**：每种棋子单独实现攻击判定（`rookAttacks`/`cannonAttacks`/`horseAttacks`…），
+  再过滤掉「走完被将军」和「将帅照面」的着法，得到合法着法。
+- **将帅照面**：`generalsFace()` 检测同列且中间无子，视为将军。
+- **结果判定**（`XiangqiGame.updateResult`）：
+  - 无合法着法且被将军 → 负（**绝杀**）；无合法着法但未被将军 → 负（**困毙**，象棋规则困毙判负）
+  - 双方都没有进攻子力（车马炮兵） → 和（无进攻子力）
+  - 连续 120 个半回合无吃子/无兵卒推进 → 和（六十回合未吃子）
+  - 同一局面第三次出现 → 和（三次重复局面）
+- **记谱**：`moveToNotation()` 生成中文记谱（车马炮兵用「进/退/平」+ 前后区分同列同名子）。
+- **撤销**：`undo()` 从头重放保留着法并回填分析元数据，保证曲线上历史评级不丢。
+
+### 3.2 引擎搜索
+
+棋盘用 **Zobrist 哈希 + 增量 make/unmake**（`doMoveHashed`/`undoMoveHashed`）维护，
+搜索热路径上不复制棋盘。
+
+单线程搜索（`negamax`）包含：
+
+| 技术 | 实现要点 |
+|---|---|
+| 迭代加深 | `searchRoot` 逐层加深，超时点检查 `deadline - now < 45ms` 即停 |
+| PVS 主变例搜索 | 首选着法全窗口，其余先零窗口，必要时重搜索 |
+| 置换表 | `Map` 按 Zobrist 键缓存，标记 exact/lower/upper，超过 60 万条清空 |
+| 空着裁剪 | `nullMove`，深度 ≥3、非将军且静态分 ≥ beta 时以 R=3 试探 |
+| 将军延伸 | `checkExtension`：被将军时深度 +1 |
+| LMR | 深度 ≥4 且第 4 个着法之后、安静非将军着法减 1（深度 ≥6 且第 10 个后减 2） |
+| 激进 / 静态裁剪 | 反转无用性裁剪 + 叶子附近的无用性裁剪与着法数上限 |
+| 静态交换评估 SEE | `staticExchangeScore` 按最小攻击者递推，亏子的吃子被降序 |
+| 杀着/历史表 | Killer moves + history 启发，着法排序依次为 置换表 → 吃子 → Killer → 历史 |
+| 静止搜索 | `quiescence` 只展开吃子与将军，避免水平线效应 |
+
+**评估函数**（`evaluateBoard`）是手工特征，不是 NNUE：子力价值
+（将 60000 / 车 1000 / 马 440 / 炮 475 / 士象 125 / 兵卒 85）+ 逐子位置分
++ 残局调整 + **残局知识表**（`ai-data.js` 的 `endgamePatterns`，例如
+单车例胜单士象、单马例和单象）+ 将军奖惩。这一点是当前棋力与皮卡鱼之类
+NNUE 引擎的主要差距。
+
+### 3.3 多 Worker 并行搜索
+
+`EngineWorkerPool` 启动 `max(2, min(4, 硬件并发数 - 1))` 个 Worker，
+把根节点着法**轮询分片**（`index % shardCount`）分发到各 Worker 并行搜索，
+再合并根节点排序结果。
+
+- Worker 脚本是 `ai-worker-bootstrap.js`，用 `importScripts` 载入 `app.js` 与
+  `ai-data.js`；`app.js` 用 `typeof window === "undefined"` 判断自己是否跑在 Worker 里。
+- Worker 崩溃/被禁用时自动回退到主线程 `analyzePosition`，
+  并把 `document.documentElement.dataset.workerBackend` 置为 `fallback` 便于诊断。
+- 手机与桌面使用同一套 Worker 调度，保证两端行为一致。
+
+### 3.4 AI 等级
+
+| 等级 | key | 深度 | 时限 | 节点上限 | 候选池 | 随机抖动 | 送子概率 | 开局库 |
+|---|---|---|---|---|---|---|---|---|
+| 瞎几把下 | `idiot` | — | — | — | — | — | 100% | 不用 |
+| 入门 | `easy` | 1 | 330ms | 3.5k | 6 | 80 | 36% | 不用 |
+| 初级 | `medium` | 4 | 900ms | 42k | 3 | 28 | 8% | 6 回合 |
+| 中级 | `hard` | 6 | 2600ms | 190k | 2 | 8 | 1% | 12 回合 |
+| 高级 | `master` | 8 | 6500ms | 1.2M | 1 | 0 | 0% | 20 回合 |
+
+非「瞎几把下」的等级都走同一条链路：**开局库 → 搜索 → 带权随机挑选**。
+`candidateCount` 决定只在最前面的几个着法里挑，`randomness` 给权重加噪声，
+`blunderChance` 有概率把候选池扩大 4 个着法——这就是「入门也会偶尔犯错」的来源。
+
+**「瞎几把下」**（`chooseIdiotMove`）故意做得很差：55% 概率完全随机走一步，
+否则用 `idiotMoveScore` 给所有着法打分后**取最差的 15% 里随机**。
+这个评分函数会主动往被吃的格子送子、无视白吃的子、放过杀棋。
+
+### 3.5 棋力分析
+
+- 每步走完做**两次分析**：走子前局面（完整档 `ANALYSIS_LEVEL`：深度 5 / 2.8s / 24 万节点 / 5 个候选）
+  和走子后局面（轻量档 `CURRENT_ANALYSIS_LEVEL`：深度 3 / 1.5s / 11 万节点 / 4 个候选）。
+- **赢面换算**：`cpToWin(cp) = 100 / (1 + exp(-cp / 350))`，钳制在 0.5%–99.5%；
+  将杀直接记 99.5% / 0.5%。
+- **着法评级**：以「相对最佳着法的赢面损失」为准（单位：百分点），共 **10 级**：
+
+| 损失 | 评级 |
+|---|---|
+| ≤0.25 或与引擎首选一致 | 最佳 |
+| ≤1 | 神准 |
+| ≤2.5 | 优秀 |
+| ≤5 | 良好 |
+| ≤8 | 稳健 |
+| ≤12 | 一般 |
+| ≤18 | 欠佳 |
+| ≤28 | 失误 |
+| ≤40 | 严重失误 |
+| >40 | 败着 |
+
+- **赢面走势图**：横轴是着法序号，纵轴是红方赢面百分比。Y 轴按实际极值
+  自动缩放（至少覆盖 0–100% 的中间段），并画一条 50% 虚线基准；
+  图数据同时写入 `#evalChart.dataset.points`，方便自动化测试直接断言数值。
+- **回退实现**（`qualityForRecord`）用 `moveScores` 全量评分而不是截断后的
+  `candidates`，避免「这步棋不在候选列表里」被误判成未分析。
+
+### 3.6 杀法识别
+
+被将死时 `classifyMate()` 会给出杀法名称，共 **11 种**：
+
+对面笑、马后炮、重炮、卧槽马、挂角马、闷宫、铁门栓、天地炮、双车错、二鬼拍门、闷杀。
+
+判定方式：先取所有正在将军的棋子（将帅照面也算一路），再算出被将方王的
+**所有可逃格子**（`kingEscapeInfo`，附带「是否被自家子挡住」），
+然后让每个杀法匹配器拿到同一份上下文（王位、将军子、逃格、双方车/炮/兵位置）自行判断。
+命中多个时按数组顺序取第一个作为横幅上显示的名字。
+
+### 3.7 音效
+
+- 三个音效（执子 `pickup`、落子 `place`、吃子 `capture`）以
+  `data:audio/mpeg;base64,...` **内联在 `ai-data.js`** 里，因此不需要任何网络请求、
+  也完全支持离线。
+- 素材来自 Kenney 的 CC0 音效包（Impact Sounds / Casino Audio）；
+  最终选用 `pickup-2.mp3`、`place-2.mp3`、`capture-3.mp3`，
+  候选与对应关系见 `outputs/sfx/CREDITS.txt`，试听页见 `outputs/sfx/preview.html`。
+- 播放音量固定为 **50%**（`SOUND_VOLUME = 0.5`），开关状态存在
+  `localStorage["xiangqi.sound.enabled"]`；吃子时播放 `capture`，否则播放 `place`。
+- 自动播放策略可能拒绝首次播放，代码里主动吞掉该异常，不会影响走子。
+
+### 3.8 棋子外观与动效
+
+- **扁平棋子**：圆形，`border: 2px solid var(--piece-stroke)` 描边，内部
+  1px 高光；颜色由 CSS 变量驱动，可运行时改。
+- **默认配色**：红 **深红 `#8b0000`**、黑 `#1f1d1a`，字色默认白色；
+  自定义颜色时 `glyphColorFor()` 用相对亮度算出对比度，亮底自动转黑字。
+  配色存在 `localStorage["xiangqi.piece.colors"]`。
+- **拖影**：走子时在同一条路径上生成 **4 个残影**（位置比 1/5、2/5、3/5、4/5），
+  依次模糊渐隐；`prefers-reduced-motion` 或「快」速自动对弈下会整体关掉动画。
+- **虚线连接上一步**：SVG 图层 `#moveLine` 画一条 `stroke-dasharray: 16 13`、
+  线宽 7、颜色取**走这步的一方**的棋子色，连接起止格的**中心点**；
+  棋子层 `z-index: 3` 高于虚线层 `z-index: 2`，所以线头被棋子盖住而不会压住棋子。
+  下一回合开始（或复盘光标移动）即重画，走子动画期间隐藏。
+- **获胜横幅**：动效横幅显示「红方/黑方胜，杀招名」，
+  底色取该方棋子颜色；点击「新对局」或「悔棋」后清除。
+
+### 3.9 计时器
+
+两个计时器显示在棋盘下方：**本局**（`state.startedAt`）与**本手**（`state.turnStartedAt`）。
+每次落子 `markMoveTiming()` 把这一手耗时写入 `record.moveTimeMs` 并重置本手计时；
+对局结束后本手计时冻结在该手耗时。联机时 `elapsedMs` 与 `turnMs` 随走子消息同步，
+两端时钟保持一致。
+
+### 3.10 联机
+
+**传输层**（`net.js`）按可用性依次回退：Android 原生插件 → 桌面 `/lan/*` HTTP 端点 →
+服务器 WebSocket → `BroadcastChannel`（同机多窗口和自动化测试用）。
+
+**局域网模式**（默认）
+
+- 使用 UDP **45455** 端口广播房间，前缀 `YJA\t`（房间）与 `YJS\t`（信令），
+  每 1.5 秒广播一次，房间 4.5 秒（原生端 6 秒）过期。
+- 房主是**中心节点**：所有人都连房主，房主负责把对局事件转发给其他人。
+- 局域网下会把 WebRTC 的 mDNS 占位候选改写为对端真实 IP（`normalizeCandidate`），
+  并关闭浏览器的 mDNS 隐藏，否则同一网段也连不上。
+
+**服务器模式**
+
+- 自建信令服务登记房间并中转 `offer/answer/ice`，房间码 **6 位**
+  （字符集 `23456789ABCDEFGHJKMNPQRSTUVWXYZ`，去掉易混的 0/O/1/I/L）。
+- ICE 配置由服务端下发（STUN）；客户端**不解析**信令内容。
+- 必须在 **wss://** 下使用：客户端页面本身是安全上下文，`ws://` 会被浏览器按混合内容拦掉。
+
+**会话语义**（`app.js`）
+
+- 座位：`hello{want:"play"}` 入场，房主回 `welcome{side}`；第三个想下棋的会收到
+  `welcome{full:true}` 并被劝去观战。
+- 观战：`hello{want:"spectate"}` 后房主回 `welcome{role:"spectator", snapshot, elapsedMs, turnMs}`，
+  随后由房主把走子/聊天/认输/重开/悔棋生效/同步转发给所有观众（`sendExcept`）。
+  观众不执棋、不能走子、不参与悔棋表决。
+- 悔棋：发起方 `undoReq`，仅**对手**弹窗确认；同意回 `undoOk` 且双方回退，
+  拒绝回 `undoNo`。观众不弹窗、不回答。
+- 一致性：收到「不在对手回合」或 `ply` 不匹配的走子消息时，回 `syncReq` 让对手发快照，
+  而不是各自猜。
+- 联机时**禁用**「自动下一步」和本地 AI 接管，避免引擎替玩家走子。
+
+### 3.11 桌面启动器
+
+单文件 C# 启动器（`xiangqi-exe/Launcher.cs`），把网页资源作为程序集资源内嵌，
+运行时解包到 EXE 同目录的 `app/`（只读目录则退到 `%LOCALAPPDATA%`），
+然后：
+
+- 用原始 `TcpListener` 起一个 `127.0.0.1:随机端口` 的 HTTP 服务。
+  **不用 `HttpListener`**——HTTP.sys 需要 URL 保留，在没注册过的机器上会卡住，
+  这正是早期「第一次打开显示无法访问」的原因。
+- 同时启动 UDP 局域网服务，并在 HTTP 服务上暴露 `/lan/hello`、`/lan/rooms`、
+  `/lan/announce`、`/lan/send`、`/lan/inbox` 五个端点，页面通过同源请求访问。
+- 交给浏览器之前先 `Probe` 探一次自己的 URL，确保不会把打不开的地址丢给用户。
+- 浏览器探测顺序：Edge → Chrome → 系统默认浏览器；Edge/Chrome 用独立 profile 启动，
+  关窗后退出。日志写在数据目录的 `launcher.log`。
+
+### 3.12 Android
+
+- Capacitor 8 工程，`minSdkVersion 24`、`targetSdkVersion 36`，包名 `com.yijian.xiangqi`。
+- `YiJianLanPlugin` 用原生 UDP 复刻桌面启动器的局域网能力，方法一一对应
+  （`announce` / `stopAnnounce` / `send` / `inbox` / `rooms` / `status`），
+  所以网页层两种外壳共用同一套接口。
+- `work/www/` 需要同步到 `android/app/src/main/assets/public/` 再打包。
+- 字体问题：`styles.css` 里的 `@font-face` 优先使用 **内嵌 base64 的 woff2 子集**
+  （LXGW WenKai，OFL 授权），并以 `xiangqi-kai.woff2` 作为回退源；
+  字体栈里还带上了 Android 常见 CJK 字体名，缺字时优雅降级。
+
+### 3.13 兼容性
+
+- `index.html` 顶部有一段**纯 ES5** 的特性探测脚本，在解析任何现代语法之前运行；
+  老 WebView 会看到「浏览器版本过低」的可读提示，而不是白屏。
+- 生产代码刻意避开可选链、`??` 等新语法并用 `verify-compat.mjs` 静态扫描，
+  同时检查 CSS 回退。
+- 桌面端在无 Edge 的精简版 Windows 上会回退到系统默认浏览器打开。
+
+---
+
+## 4. 特色功能使用教程
+
+### 4.1 双方 AI 自动对弈 / 随时接管任意一方
+
+1. 顶栏把 **红方**、**黑方**两个下拉都设成 `AI · 入门/初级/中级/高级/瞎几把下`。
+2. 用 **AI 速度** 选择快/中/慢（慢速会做完整复盘分析，最快且不带动画）。
+3. 点击 ▶ **播放** 按钮，双方 AI 才开始互相走子——不点播放不会自动走。
+   再点一次（变成 ⏸）即暂停。
+4. **随时接管**：直接在顶栏把那一方改回「我执子」或「玩家」即可，改动立即生效；
+   想交还给 AI 就再选回某个等级。对局不会中断，历史与曲线都保留。
+5. 一方获胜后自动停止播放（按钮回到 ▶），横幅显示胜方与杀招。
+
+> 区别：**人机对局**里 AI 不需要点播放——你每走一步它会自动应一手；
+> 播放按钮管的是「连续自动走子」，所以纯 AI 对 AI 必须先按 ▶。
+
+### 4.2 自动下一步（让系统替你走一手）
+
+轮到**你执棋的一方**时，点顶栏的 **自动下一步**：系统用该方记住的 AI 强度
+算出当前最佳着法并落下。
+
+- 只在轮到人类且对局进行中、复盘停留在最后一步时可用。
+- 联机对局里这个按钮会被禁用（否则等于让引擎代打）。
+
+### 4.3 「瞎几把下」难度
+
+在任意一方的下拉里选 **AI · 瞎几把下**。这个等级不做搜索：
+一半以上概率随便走，其余情况从「看起来最糟的 15% 着法」里随机挑，
+会主动送子、漏杀、放着白吃的子不吃。适合陪完全不会下棋的人练手，
+也是奶奶能赢的那个等级。
+
+### 4.4 复盘与赢面曲线
+
+1. 切到右侧 **复盘** 标签，用 `|<` `<` `>` `>|` 在棋谱间前后翻页，
+   点棋谱里的任意一手也能直接跳过去；**回到当前** 恢复实时视图。
+2. 切到 **分析** 标签看：
+   - 红方赢面条与数值、引擎评估分；
+   - 四个指标：最佳匹配、平均损失、问题着法数、我的上一步评级；
+   - **赢面走势** 曲线（每步一点，50% 虚线为基准）；
+   - **本步判定** 给出该手的 10 级评级与相对最佳着法的损失。
+3. 复盘时棋盘、虚线连接、棋谱高亮都会跟着光标一起回到那一手的状态。
+
+### 4.5 局域网联机（同网段，无需服务器）
+
+1. 双方设备连**同一个局域网**（同一个路由器，别一个走 WiFi 一个走热点）。
+2. 右侧 **联机** 标签 → 连接方式选 **局域网**，房主点 **创建房间**
+   （可设房间名和「我方执棋：红/黑/随机」）。
+3. 另一端在「局域网房间」列表里看到房间后点 **加入**；
+   列表没出现就点 **刷新**，或者用 **手动地址** 直接填 `IP:45455`。
+4. 连上后双方各自执一种颜色，**聊天** 标签的消息也会实时发给对手。
+
+连不上时点 **网络自检**：它会分别探测本机回环与通道收发，
+并在房间日志里打印本机局域网地址，方便判断是网段不一致还是通道被防火墙拦住。
+
+### 4.6 服务器模式联机（跨网络）
+
+1. 需要一台已经部署好信令服务的服务器（见 `work/server/README.md`）。
+2. 双方在 **联机** 面板把连接方式改成 **服务器**，填入
+   `wss://你的域名/ws`（此设置会被记住）。
+3. 房主点 **创建房间**，日志会打印 **6 位房间码**（例如 `7K3M9Q`），发给对手。
+4. 对手把房间码填进输入框点 **加入**；想观战就点 **观战**。
+5. 服务器模式下「网络自检」会改为探测**服务器可达性**，
+   显示「自检通过：服务器可达（server）」。
+
+### 4.7 观战
+
+- 服务器模式：在房间码输入框旁点 **观战**。
+- 局域网模式：在该房间那一行点 **观战**。
+- 观战者不占座位、不执棋、不能走子，也不参与悔棋表决；
+  进入时会立刻收到当前局面的快照与双方用时，之后每一步都实时同步。
+- 房主可以同时接受一名对手 + 多名观众。
+
+### 4.8 自定义棋子颜色
+
+顶栏有 **红方棋子**、**黑方棋子** 两个取色器：
+
+- 改完立即生效，并记住到下次打开（`localStorage`）。
+- 字色会按底色亮度自动选择黑或白，保证看得清。
+- 默认是「红底白字 / 黑底白字」的扁平描边棋子；红方默认值是深红 `#8b0000`。
+- 虚拟棋盘上的**上一手虚线**与**获胜横幅**都会跟着用你选的颜色。
+
+### 4.9 音效
+
+顶栏喇叭按钮切换开/关，状态会被记住。走子播放「落子」，吃子播放「吃子」，
+首次点击喇叭打开时会试播一声。音量统一为 50%。
+
+想看/换素材：打开 `outputs/sfx/preview.html` 试听全部候选，
+再用 `work/sfx/embed-sounds.mjs` 重新内联进 `ai-data.js`。
+
+---
+
+## 5. 开发、验证与打包
+
+### 5.1 本地预览
+
+```powershell
+cd fe\work
+node serve.mjs                      # http://127.0.0.1:4290
+```
+
+`serve.mjs` 默认把 `../outputs/xiangqi-local` 作为根目录，可用环境变量覆盖：
+
+```powershell
+$env:ROOT = "work\www"; $env:PORT = "4291"; node serve.mjs
+```
+
+想直接跑源码目录时记得先 `work\www` 里有 `ai-data.js`——
+它是 `work/ai-data.js` 加上内联音效后的产物。
+
+### 5.2 验证套件
+
+全部在 `fe/work` 下执行，输出 `... CHECKS PASSED` 或列出失败项：
+
+| 命令 | 覆盖范围 |
+|---|---|
+| `node verify-net.mjs` | 传输回退、房间握手、迟到的 ICE、观战、悔棋、服务器信令回归 |
+| `node verify-styles.mjs` | 棋子扁平样式、配色变量、字体子集覆盖 |
+| `node verify-motion.mjs` | 拖影与上一手虚线连接 |
+| `node verify-mate.mjs` | 11 种杀法识别 + 音效接线 |
+| `node verify-compat.mjs` | 老浏览器兜底、ES5 语法扫描 |
+| `node server/verify-server.mjs` | 信令服务协议（建房/加入/满座/转发/房间列表/限流） |
+
+`harness.mjs` 是这些套件共用的无头框架：它用极简 DOM 桩在 `vm` 里加载
+**生产用的同一份 `app.js`**（不复制引擎代码），因此可以直接跑 perft 与自对弈：
+
+```powershell
+node harness.mjs www\app.js   # perft 校验 + 逐层搜索基准
+```
+
+不带参数时它会去找 `app.baseline.js`（那是另一份基线引擎），所以要显式传
+`www\app.js`。它同时导出 `loadEngine` / `runPerft` / `benchSearch` / `runMatch`，
+`verify-*.mjs` 与自对弈脚本都基于这些接口。
+
+perft 基准值（改动着法生成后必须保持一致，定义在 `EXPECTED_PERFT`）：
+
+```
+depth 1: 44
+depth 2: 1920
+depth 3: 79666
+depth 4: 3290240
+```
+
+浏览器里打开 `index.html?selftest=1` 会在 `document.documentElement.dataset.selftest`
+写入一份 JSON 自检结果（perft、将帅照面、绝杀/困毙局面、开局库、搜索探针），
+适合在没有 Node 的环境里快速回归。
+
+### 5.3 打包 Windows EXE
+
+```powershell
+# 1) 先把源码同步到启动器读取的目录
+Copy-Item work\www\* outputs\xiangqi-local\ -Force
+# 2) 关掉正在运行的实例（文件被占用会导致编译失败）
+Get-Process YiJian-Xiangqi* -ErrorAction SilentlyContinue | Stop-Process -Force
+# 3) 编译
+powershell -File work\xiangqi-exe\build.ps1
+```
+
+产物是 `outputs\YiJian-Xiangqi-Portable.exe` 和同内容的
+`outputs\YiJian-Xiangqi.exe`。脚本在 `csc` 失败时会直接抛错，
+不会再默默地留下旧 EXE。
+
+### 5.4 打包 Android APK
+
+```powershell
+# 1) 同步前端资源（assets/public 不在版本库里，必须每次同步）
+Copy-Item work\www\* work\android\app\src\main\assets\public\ -Force
+
+# 2) 环境
+$env:JAVA_HOME   = "C:\Program Files\Zulu\zulu-21"
+$env:ANDROID_HOME = "<Android SDK 路径>"      # 也可由 android\local.properties 指定
+$env:GRADLE_USER_HOME = "<可写的 Gradle Home>"
+
+# 3) 离线构建
+<Gradle 8.14.3>\bin\gradle.bat -p work\android assembleDebug --offline
+```
+
+注意事项：
+
+- `work\gradle-home` 里的 `wrapper/`、`native/`、`daemon/` 是只读链接，
+  Gradle 无法在里面写原生库；请把 `caches` 目录挂到**可写的临时 Gradle Home** 下再用，
+  不要直接对仓库内的 `gh*` 目录执行 `git clean`（会穿过链接删掉缓存）。
+- 构建环境没有外网时依赖必须来自本地缓存，`--offline` 是必需的。
+- 产物在 `work\android\app\build\outputs\apk\debug\app-debug.apk`，
+  复制成 `outputs\Yijian-Xiangqi-<版本>.apk`。
+
+### 5.5 版本号与签名
+
+- `work\android\app\build.gradle` 里的 `versionCode` / `versionName` 每版递增。
+- APK 使用仓库里的 `yijian-debug.keystore` 签名，**与 1.5 起同一个密钥**，
+  证书 SHA-256 为 `33C29CFD…A581`，这样老版本可以覆盖升级。
+  打包后可以核对：
+
+```powershell
+& "<SDK>\build-tools\35.0.0\apksigner.bat" verify --print-certs <apk>
+& "<SDK>\build-tools\35.0.0\aapt2.exe" dump badging <apk> | Select-String package:
+```
+
+发版流程：提交代码 → 更新 `outputs\BUILD-INFO.txt`（版本、大小、SHA-256、本次改动）
+→ 打与版本号一致的 tag。
+
+---
+
+## 6. 服务端
+
+信令服务在 `work/server/`，零依赖（只用 Node 内置模块，WebSocket 手写实现）。
+它只做三件事：**登记房间**、**中转信令**、**下发 ICE 配置**。
+棋局数据永远走 WebRTC 数据通道，不经过服务器。
+
+完整协议、环境变量、部署清单（systemd + 反向代理 + coturn）见
+[`work/server/README.md`](work/server/README.md)。
+
+---
+
+## 7. 已知限制
+
+- **引擎评估是手工特征，不是 NNUE**。中局战术尚可，但和皮卡鱼这类
+  NNUE 引擎相比，局面理解和残局精度差距明显。
+- 开局库与残局知识表是紧凑的精选集合，不是完整库表；超出入库深度后完全依赖搜索。
+- **没有 TURN**：家用宽带之间多数能直连，两端都在手机流量（运营商 CGNAT）
+  或企业/校园网时失败率偏高。接口已预留，加 TURN 只需改服务端。
+- 服务器不持久化：重启后在线房间失效，客户端重连重建即可；房间无密码、无账号。
+- 多 Worker 并行只做**根节点分片**，没有实现共享置换表或 Lazy SMP。
+- 本仓库工作站在 Windows 上；iOS 需要 Mac + Xcode 才能构建签名。
+
+---
+
+## 8. 相关文档
+
+- [`work/server/README.md`](work/server/README.md) — 信令与房间服务
+- [`outputs/BUILD-INFO.txt`](outputs/BUILD-INFO.txt) — 每版构建信息与变更记录
+- [`outputs/sfx/CREDITS.txt`](outputs/sfx/CREDITS.txt) — 音效素材来源与授权
