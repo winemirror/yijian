@@ -4250,10 +4250,13 @@
   // Server mode joins by room code instead of picking from a discovered list.
   async function netJoinByCode(want) {
     if (!Net || typeof Net.joinByCode !== "function") return;
+    if (state.net.inRoom) return;
     const code = defaultTo(elements.netRoomCode && elements.netRoomCode.value.trim(), "")
       .toUpperCase();
-    if (code.length < 4) {
-      netLog("请输入房间码");
+    // The relay always hands out exactly six characters; anything else is a
+    // typo and would just round-trip to a "房间不存在" from the server.
+    if (code.length !== 6) {
+      netLog("请输入 6 位房间码");
       return;
     }
     const spectate = want === "spectate";
@@ -4288,7 +4291,11 @@
     try {
       const result = await Net.selfTest();
       if (result && result.ok) {
-        netLog(`自检通过：${result.mode || "-"} 通道可收发（本机回环已验证）`);
+        if (result.note === "server-reachable") {
+          netLog(`自检通过：服务器可达（${result.mode || "server"}）`);
+        } else {
+          netLog(`自检通过：${result.mode || "-"} 通道可收发（本机回环已验证）`);
+        }
       } else {
         netLog(`自检失败：${(result && result.reason) || "unknown"}`
           + (result && result.mode ? `（通道 ${result.mode}）` : ""));
@@ -4347,6 +4354,7 @@
 
   async function netHost() {
     if (!Net) return;
+    if (state.net.inRoom) return;
     const preference = defaultTo(elements.netSide && elements.netSide.value, "red");
     const side = preference === "random"
       ? (Math.random() < 0.5 ? RED : BLACK)
@@ -4377,6 +4385,7 @@
 
   async function netJoin(room, want) {
     if (!Net || !room) return;
+    if (state.net.inRoom) return;
     const spectate = want === "spectate";
     state.net.inRoom = true;
     state.net.active = false;

@@ -138,6 +138,7 @@
   function wsTransport(url) {
     var socket = null;
     var readyPromise = null;
+    var infoPromise = null;
     var blobHandler = null;
     var inbox = [];
     var waiters = [];
@@ -155,7 +156,9 @@
     // rejection surfaces as an exception instead of a timeout.
     function waitFor(type, timeoutMs) {
       for (var index = 0; index < inbox.length; index += 1) {
-        if (inbox[index].t === type || inbox[index].t === "error") {
+        // Only a reply of the expected type; a parked error must never satisfy
+        // a later, unrelated request.
+        if (inbox[index].t === type) {
           return Promise.resolve(inbox.splice(index, 1)[0]);
         }
       }
@@ -175,8 +178,14 @@
     }
 
     function deliver(message) {
+      // An error answers whichever request is pending right now. Parking it
+      // would let a stale failure poison a much later call.
+      if (message.t === "error") {
+        if (waiters.length) waiters.shift().resolve(message);
+        return;
+      }
       for (var index = 0; index < waiters.length; index += 1) {
-        if (waiters[index].type === message.t || message.t === "error") {
+        if (waiters[index].type === message.t) {
           waiters.splice(index, 1)[0].resolve(message);
           return;
         }
@@ -242,13 +251,19 @@
       onBlob: function (cb) { blobHandler = cb; },
       ready: connect,
       info: function () {
-        return connect().then(function () {
-          // The ICE config rides on "welcome", which can land just after the
-          // socket opens - wait for it instead of returning an empty list.
+        // The ICE config rides on "welcome", which can land just after the
+        // socket opens - wait for it instead of returning an empty list. The
+        // frame is only sent once per socket, so cache the handshake result;
+        // otherwise a second caller (self test, status refresh) waits forever
+        // for a frame that was already consumed.
+        if (infoPromise) return infoPromise;
+        infoPromise = connect().then(function () {
           return waitFor("welcome");
         }).then(function () {
           return { ice: iceServers, ips: [], serverId: selfId };
         });
+        infoPromise.catch(function () { infoPromise = null; });
+        return infoPromise;
       },
       poll: function () { return Promise.resolve({ cursor: 0, blobs: [] }); },
       rooms: function () {
@@ -307,6 +322,7 @@
         try { if (socket) socket.close(); } catch (error) { /* gone */ }
         socket = null;
         readyPromise = null;
+        infoPromise = null;
         inbox = [];
         waiters = [];
       }
@@ -508,6 +524,8 @@
   // which is what lets a third device watch without disturbing the game.
   var peers = Object.create(null);
   var localIceLogged = 0;
+  // Reused by hostRoom so a double tap cannot spawn two rooms.
+  var hostingPromise = null;
 
   function emit(list, payload) {
     for (var index = 0; index < list.length; index += 1) {
@@ -649,6 +667,7 @@
   // Drops every connection and the current transport, ready for a mode switch.
   function resetTransport() {
     closePeers();
+    hostingPromise = null;
     stopPolling();
     if (announceTimer) scope.clearInterval(announceTimer);
     announceTimer = null;
@@ -918,12 +937,17 @@
     },
 
     hostRoom: function (options) {
+      // A double tap used to send two room.create frames: the server created
+      // one room and rejected the second with already_in_room, which then
+      // surfaced as a scary "通道错误" and a duplicated room-code line. Share
+      // the in-flight promise so the second tap is a no-op instead.
+      if (hostingPromise) return hostingPromise;
       var room = {
         id: options.id || randomId(),
         name: options.name || "YiJian",
         role: "host"
       };
-      return api.ready().then(function () {
+      hostingPromise = api.ready().then(function () {
         if (!state.transport) {
           fail("no-transport");
           return status();
@@ -936,9 +960,13 @@
         // The relay server assigns the room code, so wait for its answer
         // before deciding what to display.
         return Promise.resolve(state.transport.announce(room)).then(function (info) {
-          if (info && info.id) state.room.id = info.id;
-          if (info && info.name) state.room.name = info.name;
-          emitDebug("announce", state.room);
+          // Mutate the local room, not state.room: a second, concurrent
+          // hostRoom call may already have replaced the shared slot, and
+          // rewriting it here is what made a rejected create report the other
+          // call's room code.
+          if (info && info.id) room.id = info.id;
+          if (info && info.name) room.name = info.name;
+          emitDebug("announce", room);
           // Re-announcing is a LAN thing; asking the server to create the room
           // again every 1.5s would spawn a room per tick.
           if (!state.transport.push) {
@@ -955,6 +983,11 @@
           return status();
         });
       });
+      hostingPromise = hostingPromise.then(function (result) {
+        hostingPromise = null;
+        return result;
+      });
+      return hostingPromise;
     },
 
     joinRoom: function (target, options) {
@@ -1086,6 +1119,16 @@
     selfTest: function () {
       return api.ready().then(function () {
         if (!state.transport) return { ok: false, reason: "no-transport", mode: null };
+        // Push transports (the relay server) have no loopback path: sending a
+        // packet to 127.0.0.1 would post a "signal" before we are in any room,
+        // which the server rejects with not_in_room. Reachability there is
+        // proven by completing the handshake and reading its welcome frame.
+        if (state.transport.push) {
+          return Promise.resolve(state.transport.info()).then(function (info) {
+            if (info && info.ice) return { ok: true, reason: "", note: "server-reachable", mode: state.mode };
+            return { ok: false, reason: "server-no-welcome", note: "server-reachable", mode: state.mode };
+          });
+        }
         var token = "selftest-" + randomId();
         var from = 0;
         // wait=0: the self test must not sit on the long poll for 25 seconds.
@@ -1159,6 +1202,7 @@
     },
 
     leave: function () {
+      hostingPromise = null;
       if (announceTimer) scope.clearInterval(announceTimer);
       announceTimer = null;
       stopPolling();
