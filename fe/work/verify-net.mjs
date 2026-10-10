@@ -488,6 +488,12 @@ try {
       && received.length === 3,
     JSON.stringify(received.length));
 
+  received.length = 0;
+  host.sendExcept("10.0.0.7:45455", { t: "chat", text: "relay" });
+  check("sendExcept skips the origin",
+    received.length === 1 && received[0].index === 1,
+    JSON.stringify(received.map((entry) => entry.index)));
+
   const counts = host.setPeerKind("10.0.0.8:45455", "spectator").peers;
   check("a spectator is counted separately",
     counts.spectators === 1 && counts.players === 1, JSON.stringify(counts));
@@ -499,6 +505,7 @@ try {
 console.log("== app.js: game protocol ==");
 try {
   const sent = [];
+  const relayed = [];
   let messageHandler = null;
   let statusHandler = null;
   const stubNet = {
@@ -513,6 +520,7 @@ try {
     hostRoom() { return Promise.resolve({ available: true, mode: "stub" }); },
     joinRoom() { return Promise.resolve({ available: true, mode: "stub" }); },
     send(message) { sent.push(message); return true; },
+    sendExcept(peerId, message) { relayed.push({ peerId, message }); return true; },
     leave() {},
     status() { return { available: true, mode: "stub", phase: "idle" }; },
   };
@@ -642,6 +650,20 @@ try {
   engine.netLeave();
   check("leaving clears the session", engine.netActive() === false);
   check("leaving frees local input", engine.canMoveLocally() === true);
+
+  // The host is the hub: what a player sends has to reach the spectators too,
+  // otherwise they only ever see the host's own moves.
+  relayed.length = 0;
+  engine.netBegin("host", RED, "甲");
+  engine.netHandleMessage(
+    { t: "move", from: 60, to: 51, ply: 0, elapsedMs: 0, turnMs: 0 },
+    { id: "peer-guest" }
+  );
+  check("host relays a guest move to the other peers",
+    relayed.length === 1 && relayed[0].peerId === "peer-guest"
+      && relayed[0].message.t === "move",
+    JSON.stringify(relayed));
+  engine.netLeave();
 } catch (error) {
   check("app protocol completed", false, String(error && error.stack || error));
 }
