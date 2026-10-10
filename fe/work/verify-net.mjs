@@ -515,6 +515,74 @@ try {
   check("中继握手完成", false, String(error && error.stack || error));
 }
 
+console.log("== net.js: server self-test must not poison the join queue ==");
+try {
+  const { listen, close } = await import("./server/server.mjs");
+  const port = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "stun:stun.example.test:3478",
+    turnUrl: "",
+    turnSecret: "",
+  });
+  const url = `ws://127.0.0.1:${port}/ws`;
+
+  const webRTC = makeFakeWebRTC();
+  const host = loadNet(webRTC, "relay-selftest", { WebSocket });
+  await host.setServer(url);
+
+  // Regression for the desktop "通道错误：join a room first" report: the old
+  // self test fired a loopback "signal" before the client was in a room. The
+  // server answered not_in_room, the reply was parked in the transport inbox,
+  // and the next room.create consumed it instead of its own reply.
+  const probe = await host.selfTest();
+  check("服务器模式自检报告服务器可达",
+    probe.ok === true && probe.mode === "server" && probe.note === "server-reachable",
+    JSON.stringify(probe));
+
+  const created = await host.hostRoom({ name: "自检后建房" });
+  check("自检之后仍能正常建房（旧错误不再污染队列）",
+    !!created.room && /^[2-9A-HJ-NP-Z]{6}$/.test(created.room.id),
+    JSON.stringify(created));
+
+  host.leave();
+  await close();
+} catch (error) {
+  check("服务器自检回归完成", false, String(error && error.stack || error));
+}
+
+console.log("== net.js: concurrent room.create must not share a code ==");
+try {
+  const { listen, close } = await import("./server/server.mjs");
+  const port = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "",
+    turnUrl: "",
+    turnSecret: "",
+  });
+  const url = `ws://127.0.0.1:${port}/ws`;
+
+  const host = loadNet(makeFakeWebRTC(), "relay-double", { WebSocket });
+  await host.setServer(url);
+
+  // Regression for the phone's duplicated "房间码 VBMSVJ …" line: a double
+  // tap fired two creates, the server rejected the second with
+  // already_in_room, but hostRoom rewrote the shared state.room, so the
+  // rejected call still reported the winner's code.
+  const results = await Promise.all([host.hostRoom({ name: "并发一" }), host.hostRoom({ name: "并发二" })]);
+  const ids = results.map((entry) => entry && entry.room && entry.room.id);
+  check("重复建房只发一次创建请求（两次调用得到同一个房间码）",
+    !!ids[0] && ids[0] === ids[1] && /^[2-9A-HJ-NP-Z]{6}$/.test(String(ids[0]))
+      && results.every((entry) => entry && entry.phase === "announcing"),
+    JSON.stringify({ ids, phases: results.map((entry) => entry && entry.phase) }));
+
+  host.leave();
+  await close();
+} catch (error) {
+  check("并发建房回归完成", false, String(error && error.stack || error));
+}
+
 console.log("== net.js: host serves an opponent and a spectator ==");
 try {
   const webRTC = makeFakeWebRTC();
