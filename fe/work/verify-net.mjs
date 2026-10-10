@@ -647,6 +647,18 @@ try {
     Date.now() - engine.state.startedAt >= 4900,
     String(Date.now() - engine.state.startedAt));
 
+  // A spectator must never be asked to approve an undo, and must never answer.
+  sent.length = 0;
+  engine.netHandleMessage({ t: "undoReq" });
+  check("a spectator is not asked to approve an undo",
+    sent.length === 0, JSON.stringify(sent));
+
+  const plyBefore = engine.state.game.history.length;
+  engine.netHandleMessage({ t: "undoOk" });
+  check("a spectator rolls back once the players agree",
+    engine.state.game.history.length === plyBefore - 1,
+    `before=${plyBefore} after=${engine.state.game.history.length}`);
+
   engine.netLeave();
   check("leaving clears the session", engine.netActive() === false);
   check("leaving frees local input", engine.canMoveLocally() === true);
@@ -664,6 +676,16 @@ try {
       && relayed[0].message.t === "move",
     JSON.stringify(relayed));
   engine.netLeave();
+
+  // "Auto next step" is a single-player convenience and must be off in a room.
+  engine.netBegin("guest", RED, "乙");
+  check("auto next step is disabled in a net game",
+    engine.__document.getElementById("autoStep").disabled === true,
+    String(engine.__document.getElementById("autoStep").disabled));
+  engine.netLeave();
+  check("auto next step comes back after leaving the room",
+    engine.__document.getElementById("autoStep").disabled === false,
+    String(engine.__document.getElementById("autoStep").disabled));
 } catch (error) {
   check("app protocol completed", false, String(error && error.stack || error));
 }
