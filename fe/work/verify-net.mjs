@@ -583,6 +583,60 @@ try {
   check("并发建房回归完成", false, String(error && error.stack || error));
 }
 
+console.log("== net.js: TURN 中继探测 ==");
+try {
+  // 没配置 TURN：应立刻给出 no-turn-configured，而不是白等超时。
+  const plain = loadNet(makeFakeWebRTC(), "turn-none");
+  const none = await plain.turnCheck();
+  check("未配置 TURN 时直接报 no-turn-configured",
+    none.ok === false && none.reason === "no-turn-configured", JSON.stringify(none));
+
+  // 只会吐 relay 候选的假 RTCPeerConnection。
+  function makeRelayWebRTC() {
+    function PC(config) {
+      this.config = config;
+      this.onicecandidate = null;
+    }
+    PC.prototype.createDataChannel = function () { return {}; };
+    PC.prototype.createOffer = function () { return Promise.resolve({ type: "offer", sdp: "x" }); };
+    PC.prototype.setLocalDescription = function () {
+      const self = this;
+      return Promise.resolve().then(function () {
+        if (self.onicecandidate) {
+          self.onicecandidate({
+            candidate: {
+              candidate: "candidate:1 1 udp 1 1.2.3.4 50000 typ relay raddr 0.0.0.0 rport 0"
+            }
+          });
+        }
+      });
+    };
+    PC.prototype.close = function () {};
+    return { PeerConnection: PC };
+  }
+
+  const net = loadNet(makeRelayWebRTC(), "turn-relay");
+  // 模拟服务端 welcome 下发的 ICE 配置
+  net.__state.iceServers = [{
+    urls: "turn:turn.example.test:3478",
+    username: "1:probe",
+    credential: "x"
+  }];
+  check("status 报出 TURN 条数", net.status().turn === 1, String(net.status().turn));
+  const ok = await net.turnCheck(2000);
+  check("能拿到 relay 候选时 TURN 自检通过",
+    ok.ok === true && / typ relay/.test(String(ok.candidate)), JSON.stringify(ok));
+
+  const mixed = loadNet(makeRelayWebRTC(), "turn-mixed");
+  mixed.__state.iceServers = [
+    { urls: "stun:stun.example.test:3478" },
+    { urls: ["turn:turn.example.test:3478?transport=udp", "turn:turn.example.test:3478?transport=tcp"] }
+  ];
+  check("STUN 条目不算 TURN", mixed.status().turn === 1, String(mixed.status().turn));
+} catch (error) {
+  check("TURN 探测用例完成", false, String(error && error.stack || error));
+}
+
 console.log("== net.js: host serves an opponent and a spectator ==");
 try {
   const webRTC = makeFakeWebRTC();
