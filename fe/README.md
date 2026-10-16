@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| 当前版本 | 3.2（versionCode 31） |
+| 当前版本 | 3.3（versionCode 32） |
 | 运行形态 | 浏览器离线版 / Windows 便携 EXE / Android APK |
 | 前端 | 原生 JavaScript，零框架、零构建步骤 |
 | 服务端 | Node.js，零依赖（WebSocket 按 RFC 6455 手写） |
@@ -243,6 +243,9 @@ NNUE 引擎的主要差距。
   UDP 被封的网络里 TCP 还能兜底。
 - 客户端**不解析**信令内容，只是把服务端给的 ICE 列表原样交给 `RTCPeerConnection`；
   拿到 `typ relay` 候选时会在房间日志里提示「已获得中继候选（TURN 中继可用）」。
+- 信令连接自带自愈：socket 被系统掐掉（手机切后台最常见）时立刻判失败并自动重连重试一次；
+  对「半开连接」（本地 `readyState` 还是 open、报文其实发不出去）会在加入前用一次
+  应用层 ping 探测出来，而不是干等到 8 秒超时才报 `server timeout: room.joined`。
 - 必须在 **wss://** 下使用：客户端页面本身是安全上下文，`ws://` 会被浏览器按混合内容拦掉。
 
 **会话语义**（`app.js`）

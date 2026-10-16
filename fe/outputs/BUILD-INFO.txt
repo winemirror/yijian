@@ -1,76 +1,76 @@
-弈鉴 · 3.2 构建信息（2026-10-16）
+弈鉴 · 3.3 构建信息（2026-10-16）
 
 包名: com.yijian.xiangqi
-版本: 3.2 (versionCode 31)
+版本: 3.3 (versionCode 32)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.2.apk
+APK 文件: Yijian-Xiangqi-3.3.apk
+文件大小: 4360645 bytes
+SHA-256: 9712FC1CD56CFEE3B4CBF3451801DE65B316764BCD2FD8915E4B784C7DE6FD9E
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 473088 bytes
+SHA-256: 3FE0168D5047CE7C945EF35E37B6952B4CAE0FDDE4D91346FEEF60B605C9AEAC
+
+上一版: Yijian-Xiangqi-3.2.apk
 文件大小: 4359061 bytes
 SHA-256: E296648A79D81257D82D85137668AD19521A2C76B46010B94132160431AB9944
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 469504 bytes
-SHA-256: 3729308E9D1611CB14B70F23A9C5802EDB2EE70BB9C23086404861203BF9172E
+本次改动: 修复"手机加入房间时报 server timeout: room.joined"
 
-上一版: Yijian-Xiangqi-3.1.apk
-文件大小: 4357301 bytes
-SHA-256: 7378AA1B4A98460CFA595263C3EF0EE5A1E796CFF201DC9242CF9277975CDCE1
+现象（实测复现）：
+  手机用流量、电脑用宽带，电脑建房拿到房间码 FPATHY；手机点加入后
+  8 秒整报 `通道错误：Error: server timeout: room.joined`。
 
-本次改动: TURN 中继打通（服务端 + 客户端 + 部署）
-
-背景：3.0/3.1 只下发 STUN，两端都在运营商 CGNAT 后面（例如都用手机流量）时
-无法直连，对局建不起来。coturn 其实早已在服务器上跑着并配好了 use-auth-secret，
-缺的是信令服务端不下发 TURN。
-
-服务端（fe/work/server/server.mjs）:
-  - iceServers() 现在同时下发 STUN 与 TURN：
-    username = "<过期unix时间戳>:<随机串>"，
-    credential = base64(HMAC-SHA1(static-auth-secret, username))，即 coturn 的 REST 临时凭证。
-    凭证即时计算、只在内存里，静态密码从不下发也不落库。
-  - TURN_URL 支持逗号分隔多条，一条时保持字符串、多条时给 urls 数组；
-    部署里下发 udp + tcp 两条（UDP 快，UDP 被封时 TCP 兜底）。
-  - TURN_TTL 夹在 60 ~ 86400 秒之间，避免配错成 0 或过大。
-  - /health 新增 stun / turn 计数；启动日志打印 stun/turn/ttl。
+定位：
+  服务端日志显示手机确实连上过（14:45:36），房间也建好了（14:45:43），
+  但**没有任何 room.join 记录**，而连接直到 14:46:26 才断——也就是说
+  客户端那条 room.join 根本没发出去，服务端当然不会回包。
+  根因在客户端：信令 socket 已经死了（iOS 把网页切到后台会掐掉 WebSocket，
+  更隐蔽的是"半开连接"：本地 readyState 还是 open，报文却石沉大海），
+  而 post() 发不出去时只是静默返回 false，调用方只能干等满 8 秒超时。
 
 客户端（fe/work/www/net.js + app.js）:
-  - 服务端下发的 ICE 列表原本就会被原样交给 RTCPeerConnection，本次补上可观测性：
-    拿到 typ relay 候选时在房间日志里提示「已获得中继候选（TURN 中继可用）」。
-  - 新增 Net.turnCheck()：用 iceTransportPolicy "relay" 起一条临时连接只收集中继候选，
-    能拿到 relay 候选即代表凭证与 coturn 都通；未配置 TURN 时直接返回 no-turn-configured。
-  - 「网络自检」按钮在服务器可达性之后追加一次中继自检并写进房间日志。
-  - status() 新增 turn 字段（TURN 条目数）。
-  - 静态资源版本号统一升到 3.2.0-20261016，避免旧缓存。
+  - waitFor 的等待项现在带 reject；socket 触发 onclose 时统一 failWaiters，
+    立刻以 signalling-closed 失败，不再干等超时。
+  - onclose 里清空 readyPromise / infoPromise / socket，使下一次 connect()
+    能真正重开一条连接（之前 readyPromise 永远指向死连接，重连永远不会发生）。
+  - 发送失败不再静默：postOrThrow() 在 room.create / room.list / room.join
+    发不出去时立刻抛 signalling-not-ready。
+  - joinSignalling 在真正 join 之前先发一条应用层 ping 并等 2.5 秒 pong，
+    专门用来戳穿"半开连接"。
+  - joinByCode 遇到上述传输层错误会自动重连并重试一次（用户无感）。
+  - 错误文案翻译成人话：signalling-closed/signalling-not-ready → "信令连接已断开
+    （页面切后台后常见），请重试"；server timeout → "服务器无响应，请检查网络后重试"；
+    另外补上 no_room / room_full / already_in_room 的中文提示。
+  - 房间日志新增两类事件：信令连接已断开、正在重连后重试…。
 
-部署（fe/work/server/deploy.sh + coturn.conf）:
-  - deploy.sh 新增 PUBLIC_IP / TURN_SECRET / TURN_TTL / REALM / TURN_URL 支持，
-    未显式给 TURN_URL 时按 PUBLIC_IP 自动生成 udp+tcp 两条；
-    INSTALL_COTURN=1 时渲染 /etc/turnserver.conf（先备份）、重启 coturn。
-  - coturn.conf 改为可渲染模板（__PUBLIC_IP__ / __TURN_SECRET__ / __REALM__）。
+服务端（fe/work/server/server.mjs）:
+  - sendError() 增加日志（error <code> -> <clientId>）。
+  - room.join 在处理前先记一行 room.join <CODE> <- <clientId>。
+    以前只有成功的 join 会写日志，出问题时从服务端看不出"客户端到底有没有发过来"。
 
 验证:
-  verify-server 新增：TURN 凭证等于 base64(HMAC-SHA1(secret, username))、默认 600 秒有效期、
-    多 URL 合并成 urls 数组、TURN_TTL 生效、只给 URL 不给 secret 时不下发、/health 的 stun/turn 计数。
-  verify-net 新增：未配置 TURN 时返回 no-turn-configured、拿到 relay 候选时自检通过、
-    status().turn 计数正确、STUN 条目不被算成 TURN。
+  verify-net 新增两条回归，用假 WebSocket 精确复现两种断线：
+    - onclose 路径：79ms 失败并重连成功（旧实现要等满 8000ms）。
+    - 半开连接路径：ping 探测在 2565ms 发现并重连成功。
   六个套件全绿；perft(4) = 3290240。
+  线上冒烟：两个客户端对 c.syjnb.top 建房 + 加入，双向 room.joined / peer.join 正常。
 
 部署状态：已上线（2026-10-16）
-  - 主机 45.32.112.15，systemd yijian-signal 已注入
-    TURN_URL=turn:45.32.112.15:3478?transport=udp,turn:45.32.112.15:3478?transport=tcp
-    TURN_SECRET / TURN_TTL=600，并保留原有的 HOST=127.0.0.1 drop-in。
+  - 信令服务 /opt/yijian/server.mjs 已更新并重启，
+    sha256 aa740f9840ca59163585e6fbce692a1df6e0e18c416510a30119057712116593（与仓库一致）。
+  - 网页端 /var/www/web.syjnb.top/yijian/ 已更新，
+    net.js sha256 7370268eb30818e3eb9e66db7f8849ae176b76f7c571da9b1c3c4da6c208645b（与仓库一致）。
+    静态资源带 ?v=3.3.0-20261016，绕开 nginx 的 7 天 immutable 缓存。
   - https://c.syjnb.top/health → {"ok":true,"proto":1,"ice":2,"stun":1,"turn":2}
-  - 线上 welcome 实测下发 STUN + TURN(udp,tcp) + 临时凭证，
-    凭证的 HMAC 与 coturn 的 static-auth-secret 校验一致。
-  - turnutils_uclient 真实分配成功：Received relay addr: 45.32.112.15:49188。
-  - ufw 已放行 49160:49200/udp（coturn.conf 里 min-port/max-port 指定的中继端口段）。
+  - yijian-signal 与 coturn 均为 active。
 
-已知限制（3.2）:
-  - 中继流量跑在这台 VPS 上，带宽与延迟都不如直连；并发路数受 min-port/max-port 限制，
-    人多时需要扩端口段或多加一台 TURN。
-  - 客户端页面是安全上下文，服务端仍必须用 wss://（客户端不解析信令内容，
-    TURN 也是服务端下发，客户端零配置）。
-  - 服务端不存棋局，重启会让在线房间失效（客户端重连重建即可）。
+已知限制（3.3）:
+  - 半开连接靠 ping 探测，代价是每次加入房间前多一个来回（约 2.5 秒上限，
+    正常网络下几十毫秒）。真·完全断网时仍会给出"服务器无响应"。
+  - TURN 中继带宽仍是那台 VPS 的带宽，两端都在 CGNAT 后面时全程走中继。
 
-说明: 基于 3.1 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.2 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
