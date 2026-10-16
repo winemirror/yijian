@@ -2,15 +2,39 @@
 # 弈鉴信令服务 —— 在 VPS 上执行（需要 root/sudo）
 #
 # 用法（在服务器上，和 server.mjs 同一目录）：
-#   STUN_HOST=stun:你的域名:3478 ./deploy.sh
+#   STUN_HOST=stun:你的域名:3478 \
+#   TURN_SECRET=一段随机串 PUBLIC_IP=你的公网IP \
+#   ./deploy.sh
 #
-# 只做三件事：拷文件、装 systemd 单元、起来并自检。不装任何软件包，
-# 不改防火墙 —— 端口放行请你自己确认（这台机器上还跑着 Hysteria）。
+# 做三件事：拷文件、装 systemd 单元、起来并自检。
+# 加 INSTALL_COTURN=1 时会额外渲染 /etc/turnserver.conf 并重启 coturn。
+# 不装任何软件包，也不改防火墙 —— 端口放行请你自己确认。
+#
+# 环境变量：
+#   PORT            信令端口，默认 8787
+#   STUN_HOST       形如 stun:你的域名或IP:3478
+#   PUBLIC_IP       TURN 的公网地址（coturn 的 external-ip，也是 TURN_URL 的默认主机）
+#   TURN_SECRET     TURN 临时凭证密钥，必须与 coturn 的 static-auth-secret 一致
+#   TURN_URL        可省略：给了 PUBLIC_IP + TURN_SECRET 时自动生成 udp+tcp 两条
+#   TURN_TTL        凭证有效期（秒），默认 600
+#   REALM           coturn realm，默认取 PUBLIC_IP
+#   INSTALL_COTURN  设为 1 则同时写入 /etc/turnserver.conf 并重启 coturn
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/yijian}"
 PORT="${PORT:-8787}"
 STUN_HOST="${STUN_HOST:-}"
+PUBLIC_IP="${PUBLIC_IP:-}"
+TURN_SECRET="${TURN_SECRET:-}"
+TURN_TTL="${TURN_TTL:-600}"
+REALM="${REALM:-}"
+TURN_URL="${TURN_URL:-}"
+
+# 给了公网 IP 和 secret 但没写 TURN_URL 时，默认同时下发 udp 与 tcp 两条中继地址：
+# UDP 更快，TCP 在 UDP 被封的网络里还能兜底。
+if [ -z "$TURN_URL" ] && [ -n "$PUBLIC_IP" ] && [ -n "$TURN_SECRET" ]; then
+  TURN_URL="turn:$PUBLIC_IP:3478?transport=udp,turn:$PUBLIC_IP:3478?transport=tcp"
+fi
 
 # 以脚本自身所在目录为准，这样从任何 cwd 运行都能找到 server.mjs
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,7 +72,36 @@ echo "==> 安装到 $APP_DIR"
 install -d "$APP_DIR"
 install -m 0644 "$SCRIPT_DIR/server.mjs" "$APP_DIR/server.mjs"
 
+if [ "${INSTALL_COTURN:-0}" = "1" ]; then
+  if [ -z "$PUBLIC_IP" ] || [ -z "$TURN_SECRET" ]; then
+    echo "INSTALL_COTURN=1 需要同时设置 PUBLIC_IP 与 TURN_SECRET" >&2
+    exit 1
+  fi
+  echo "==> 渲染 coturn 配置"
+  if [ -f /etc/turnserver.conf ]; then
+    cp -a /etc/turnserver.conf "/etc/turnserver.conf.bak.$(date +%s)"
+  fi
+  rendered="$(mktemp)"
+  sed -e "s|__PUBLIC_IP__|$PUBLIC_IP|g" \
+      -e "s|__TURN_SECRET__|$TURN_SECRET|g" \
+      -e "s|__REALM__|${REALM:-$PUBLIC_IP}|g" \
+      "$SCRIPT_DIR/coturn.conf" > "$rendered"
+  install -m 0640 -o root -g turnserver "$rendered" /etc/turnserver.conf
+  rm -f "$rendered"
+  systemctl enable coturn >/dev/null 2>&1 || true
+  systemctl restart coturn
+  echo "    coturn 已重启"
+fi
+
 echo "==> 写 systemd 单元"
+ENV_LINES="Environment=PORT=$PORT
+Environment=STUN_URL=$STUN_HOST"
+if [ -n "$TURN_URL" ] && [ -n "$TURN_SECRET" ]; then
+  ENV_LINES="$ENV_LINES
+Environment=TURN_URL=$TURN_URL
+Environment=TURN_SECRET=$TURN_SECRET
+Environment=TURN_TTL=$TURN_TTL"
+fi
 cat > /etc/systemd/system/yijian-signal.service <<EOF
 [Unit]
 Description=YiJian signalling server
@@ -57,8 +110,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=PORT=$PORT
-Environment=STUN_URL=$STUN_HOST
+$ENV_LINES
 ExecStart=$(command -v node) $APP_DIR/server.mjs
 Restart=always
 RestartSec=3
@@ -88,9 +140,12 @@ cat <<MSG
 接下来（这些需要你自己确认，脚本不动防火墙也不签证书）：
 
   1) 放行端口：$PORT/tcp（或交给 Caddy 反代）、3478/udp+tcp（STUN）
+     如果启用了 TURN，还要放行中继端口段 49160-49200/udp
+     （coturn.conf 里的 min-port / max-port，两端都在 CGNAT 后面时靠它中转）
      这台机器上跑着 Hysteria，注意别和它的 UDP 443 冲突。
   2) HTTPS/WSS：客户端从安全上下文发起 ws:// 会被拦，
      所以要让 Caddy/nginx 反代出 wss://你的域名/ws
   3) 客户端里填：连接方式=服务器，地址 = wss://你的域名/ws
+     服务器会随 welcome 一起下发 TURN 临时凭证，客户端无需任何额外配置。
 
 MSG

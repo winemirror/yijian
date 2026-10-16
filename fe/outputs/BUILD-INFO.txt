@@ -1,73 +1,76 @@
-弈鉴 · 3.1 构建信息（2026-10-10）
+弈鉴 · 3.2 构建信息（2026-10-16）
 
 包名: com.yijian.xiangqi
-版本: 3.1 (versionCode 30)
+版本: 3.2 (versionCode 31)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.1.apk
+APK 文件: Yijian-Xiangqi-3.2.apk
+文件大小: 4359061 bytes
+SHA-256: E296648A79D81257D82D85137668AD19521A2C76B46010B94132160431AB9944
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 469504 bytes
+SHA-256: 3729308E9D1611CB14B70F23A9C5802EDB2EE70BB9C23086404861203BF9172E
+
+上一版: Yijian-Xiangqi-3.1.apk
 文件大小: 4357301 bytes
 SHA-256: 7378AA1B4A98460CFA595263C3EF0EE5A1E796CFF201DC9242CF9277975CDCE1
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 464384 bytes
-SHA-256: 27CAF5724FF02477238A153FEAC2F0387AB74F28E0813C357240942C2A043F7B
+本次改动: TURN 中继打通（服务端 + 客户端 + 部署）
 
-上一版: Yijian-Xiangqi-3.0.apk
-文件大小: 4356229 bytes
-SHA-256: BE5D3FDD79D3CE1DC86040232E97C79F528FBEEA1791ACB2D0BEE4EF64BF90B7
+背景：3.0/3.1 只下发 STUN，两端都在运营商 CGNAT 后面（例如都用手机流量）时
+无法直连，对局建不起来。coturn 其实早已在服务器上跑着并配好了 use-auth-secret，
+缺的是信令服务端不下发 TURN。
 
-本次改动: 修复服务器模式联机的两个真实设备问题
+服务端（fe/work/server/server.mjs）:
+  - iceServers() 现在同时下发 STUN 与 TURN：
+    username = "<过期unix时间戳>:<随机串>"，
+    credential = base64(HMAC-SHA1(static-auth-secret, username))，即 coturn 的 REST 临时凭证。
+    凭证即时计算、只在内存里，静态密码从不下发也不落库。
+  - TURN_URL 支持逗号分隔多条，一条时保持字符串、多条时给 urls 数组；
+    部署里下发 udp + tcp 两条（UDP 快，UDP 被封时 TCP 兜底）。
+  - TURN_TTL 夹在 60 ~ 86400 秒之间，避免配错成 0 或过大。
+  - /health 新增 stun / turn 计数；启动日志打印 stun/turn/ttl。
 
-1) 桌面端「通道错误：join a room first / 自检失败：loopback-failed」
-   服务器模式下自检仍然走了局域网的回环探测：它往 127.0.0.1 发一个
-   signal，而此刻客户端还没进任何房间，服务端按协议回 not_in_room。
-   旧实现把这个错误「寄存」在传输层收件箱里，27 秒后真正加入房间时，
-   等待 room.joined 的那一步先捡到了这条过期错误，于是加入流程直接被
-   判失败——用户看到的房间码其实是有效的。
-   修复：
-   - wsTransport.deliver() 现在只把 error 交给「当前正在等待」的请求，
-     不再寄存；waitFor() 也不再从收件箱里捞 error。
-   - selfTest() 对推送式传输（服务器模式）改为握手可达性探测：连上
-     WebSocket、等到 welcome 即判定「服务器可达」，不再发无效 signal。
-     界面日志相应显示「自检通过：服务器可达（server）」。
-   - wsTransport.info() 缓存握手结果：welcome 每个连接只发一次，第二次
-     调用 info() 以前会一直等到超时。
+客户端（fe/work/www/net.js + app.js）:
+  - 服务端下发的 ICE 列表原本就会被原样交给 RTCPeerConnection，本次补上可观测性：
+    拿到 typ relay 候选时在房间日志里提示「已获得中继候选（TURN 中继可用）」。
+  - 新增 Net.turnCheck()：用 iceTransportPolicy "relay" 起一条临时连接只收集中继候选，
+    能拿到 relay 候选即代表凭证与 coturn 都通；未配置 TURN 时直接返回 no-turn-configured。
+  - 「网络自检」按钮在服务器可达性之后追加一次中继自检并写进房间日志。
+  - status() 新增 turn 字段（TURN 条目数）。
+  - 静态资源版本号统一升到 3.2.0-20261016，避免旧缓存。
 
-2) 手机端「通道错误：Error: leave the current room」+ 房间码打印两次
-   创建房间被触发了两次（连点/重复事件）。第二次房间创建被服务端按
-   already_in_room 拒绝，而 hostRoom 内部改写的是共享的 state.room，
-   结果是这次「失败」的调用回读到了第一次成功创建的房间码，界面上于是
-   出现两行一模一样的「房间码 VBMSVJ」外加一条吓人的通道错误。
-   修复：
-   - app.js：netHost / netJoin / netJoinByCode 在已进房时任一次调用直接
-     返回，堵住重复触发。
-   - net.js：hostRoom 复用进行中的 Promise，连点只会发起一次 room.create；
-     并且只改写本次调用自己的 room 对象，不再动共享引用。
-   - 房间码输入校验收紧为 6 位（服务端固定 6 位），少打一位会直接提示
-     「请输入 6 位房间码」，不再白跑一趟服务端。
+部署（fe/work/server/deploy.sh + coturn.conf）:
+  - deploy.sh 新增 PUBLIC_IP / TURN_SECRET / TURN_TTL / REALM / TURN_URL 支持，
+    未显式给 TURN_URL 时按 PUBLIC_IP 自动生成 udp+tcp 两条；
+    INSTALL_COTURN=1 时渲染 /etc/turnserver.conf（先备份）、重启 coturn。
+  - coturn.conf 改为可渲染模板（__PUBLIC_IP__ / __TURN_SECRET__ / __REALM__）。
 
 验证:
-  verify-net 新增两项回归：
-   - 「服务器模式自检报告服务器可达」+「自检之后仍能正常建房（旧错误不再
-     污染队列）」——复现桌面端 selfTest → 建房 的完整时序。
-   - 「重复建房只发一次创建请求（两次调用得到同一个房间码）」。
-  verify-net（含服务器信令握手）、verify-server、verify-styles、verify-motion、
-  verify-mate、verify-compat 全部通过。
-  APK 内 assets/public/net.js 已确认含本次修复；apksigner 校验签名仍为
-  33c29cfd…a581，与 1.5 相同。
+  verify-server 新增：TURN 凭证等于 base64(HMAC-SHA1(secret, username))、默认 600 秒有效期、
+    多 URL 合并成 urls 数组、TURN_TTL 生效、只给 URL 不给 secret 时不下发、/health 的 stun/turn 计数。
+  verify-net 新增：未配置 TURN 时返回 no-turn-configured、拿到 relay 候选时自检通过、
+    status().turn 计数正确、STUN 条目不被算成 TURN。
+  六个套件全绿；perft(4) = 3290240。
 
-部署状态:
-  信令服务器 wss://c.syjnb.top/ws 与 STUN stun:45.32.112.15:3478 已上线，
-  本次不改服务端代码，无需重新部署。
+部署状态：已上线（2026-10-16）
+  - 主机 45.32.112.15，systemd yijian-signal 已注入
+    TURN_URL=turn:45.32.112.15:3478?transport=udp,turn:45.32.112.15:3478?transport=tcp
+    TURN_SECRET / TURN_TTL=600，并保留原有的 HOST=127.0.0.1 drop-in。
+  - https://c.syjnb.top/health → {"ok":true,"proto":1,"ice":2,"stun":1,"turn":2}
+  - 线上 welcome 实测下发 STUN + TURN(udp,tcp) + 临时凭证，
+    凭证的 HMAC 与 coturn 的 static-auth-secret 校验一致。
+  - turnutils_uclient 真实分配成功：Received relay addr: 45.32.112.15:49188。
+  - ufw 已放行 49160:49200/udp（coturn.conf 里 min-port/max-port 指定的中继端口段）。
 
-已知限制（沿用 3.0）:
-  - 没有 TURN：家用宽带之间多数能直连；两端都在手机流量上（国内运营商
-    CGNAT）失败率明显偏高；企业网/校园网经常不通。接口已留，加 TURN 只改
-    服务端。
-  - 公网必须 wss://：安卓端 https://localhost、桌面端 http://127.0.0.1 都是
-    安全上下文，ws:// 会被浏览器按混合内容拦掉。
+已知限制（3.2）:
+  - 中继流量跑在这台 VPS 上，带宽与延迟都不如直连；并发路数受 min-port/max-port 限制，
+    人多时需要扩端口段或多加一台 TURN。
+  - 客户端页面是安全上下文，服务端仍必须用 wss://（客户端不解析信令内容，
+    TURN 也是服务端下发，客户端零配置）。
   - 服务端不存棋局，重启会让在线房间失效（客户端重连重建即可）。
 
-说明: 基于 3.0 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.1 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。

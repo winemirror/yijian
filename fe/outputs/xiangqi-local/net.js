@@ -524,6 +524,7 @@
   // which is what lets a third device watch without disturbing the game.
   var peers = Object.create(null);
   var localIceLogged = 0;
+  var relayLogged = 0;
   // Reused by hostRoom so a double tap cannot spawn two rooms.
   var hostingPromise = null;
 
@@ -567,8 +568,30 @@
       prefer: state.prefer,
       serverUrl: state.serverUrl,
       error: state.error,
-      localIps: state.localIps.slice()
+      localIps: state.localIps.slice(),
+      // 服务端有没有下发 TURN，UI 用它提示"直连 / 可中继"。
+      turn: turnServers().length
     };
+  }
+
+  // TURN 条目由信令服务端下发（带 coturn 的临时凭证）。
+  function isTurnServer(server) {
+    if (!server) return false;
+    var urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    for (var index = 0; index < urls.length; index += 1) {
+      var url = String(urls[index] || "");
+      if (url.indexOf("turn:") === 0 || url.indexOf("turns:") === 0) return true;
+    }
+    return false;
+  }
+
+  function turnServers() {
+    var list = state.iceServers || [];
+    var out = [];
+    for (var index = 0; index < list.length; index += 1) {
+      if (isTurnServer(list[index])) out.push(list[index]);
+    }
+    return out;
   }
 
   // Records where this device sits on the network, so the UI can show it and
@@ -693,6 +716,7 @@
     peers = Object.create(null);
     state.peer = null;
     localIceLogged = 0;
+    relayLogged = 0;
   }
 
   function newPeerConnection(peer) {
@@ -701,12 +725,19 @@
     });
     connection.onicecandidate = function (event) {
       if (!event.candidate) return;
+      var candidateText = String(event.candidate.candidate || "");
+      // A relayed candidate means the TURN allocation succeeded, i.e. the
+      // credentials the server handed out actually work against coturn.
+      if (!relayLogged && / typ relay/.test(candidateText)) {
+        relayLogged += 1;
+        emitDebug("relay", { text: candidateText.slice(0, 110) });
+      }
       // Log the first few local candidates: whether they carry a real LAN
       // address or an mDNS placeholder decides if the peer can reach us.
       if (localIceLogged < 3) {
         localIceLogged += 1;
         emitDebug("candidate", {
-          text: String(event.candidate.candidate || "").slice(0, 110)
+          text: candidateText.slice(0, 110)
         });
       }
       if (peer.addr) {
@@ -1153,6 +1184,55 @@
         });
       }).catch(function (error) {
         return { ok: false, reason: describe(error), mode: state.mode };
+      });
+    },
+
+    // TURN 可达性自检：用 iceTransportPolicy "relay" 起一条临时连接，
+    // 只收集中继候选。能拿到 relay 候选，就说明服务端下发的临时凭证
+    // 以及公网上的 coturn 都是通的（两端都在 CGNAT 后面时的救命通道）。
+    turnCheck: function (timeoutMs) {
+      var servers = turnServers();
+      if (!servers.length) return Promise.resolve({ ok: false, reason: "no-turn-configured" });
+      if (!hasPeerConnection()) return Promise.resolve({ ok: false, reason: "no-webrtc" });
+      return new Promise(function (resolve) {
+        var connection = null;
+        var settled = false;
+        var timer = scope.setTimeout(function () { finish(null); }, timeoutMs || 4000);
+
+        function finish(candidate) {
+          if (settled) return;
+          settled = true;
+          scope.clearTimeout(timer);
+          try { if (connection) connection.close(); } catch (error) { /* gone */ }
+          resolve(candidate
+            ? { ok: true, reason: "", candidate: String(candidate.candidate || "").slice(0, 90) }
+            : { ok: false, reason: "no-relay-candidate" });
+        }
+
+        try {
+          connection = new scope.RTCPeerConnection({
+            iceServers: servers,
+            iceTransportPolicy: "relay"
+          });
+        } catch (error) {
+          finish(null);
+          return;
+        }
+        connection.onicecandidate = function (event) {
+          if (!event.candidate) return;
+          if (/ typ relay/.test(String(event.candidate.candidate || ""))) finish(event.candidate);
+        };
+        connection.onicegatheringstatechange = function () {
+          if (connection.iceGatheringState === "complete") finish(null);
+        };
+        try {
+          connection.createDataChannel("turn-check");
+          Promise.resolve(connection.createOffer())
+            .then(function (offer) { return connection.setLocalDescription(offer); })
+            .catch(function () { finish(null); });
+        } catch (error) {
+          finish(null);
+        }
       });
     },
 

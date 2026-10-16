@@ -4,7 +4,9 @@
 //
 // Covers: hello/ice, room create, join as player, join as spectator, the
 // two-player seat limit, opaque signal relay, peer.join/leave notifications,
-// host-leave closing the room, the room list and the /health endpoint.
+// host-leave closing the room, the room list, the /health endpoint and the
+// TURN REST credential (URL 列表、有效期、HMAC 校验、缺 secret 时不下发).
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -81,9 +83,19 @@ try {
   const servers = (welcome.ice && welcome.ice.servers) || [];
   check("下发 STUN", servers.some((s) => String(s.urls).startsWith("stun:")),
     JSON.stringify(servers));
-  check("下发 TURN 时带临时凭证",
-    servers.some((s) => String(s.urls).startsWith("turn:") && s.username && s.credential),
+  const turn = servers.find((s) => String(s.urls).startsWith("turn:"));
+  check("下发 TURN 时带临时凭证", !!(turn && turn.username && turn.credential),
     JSON.stringify(servers.map((s) => s.urls)));
+  check("TURN 凭证 = base64(HMAC-SHA1(secret, username))",
+    !!turn
+      && crypto.createHmac("sha1", "test-secret").update(turn.username).digest("base64")
+        === turn.credential,
+    turn ? turn.username : "-");
+  const expireAt = Number(String(turn && turn.username).split(":")[0]);
+  const expectedExpiry = Math.floor(Date.now() / 1000) + 600;
+  check("TURN 凭证默认 600 秒有效",
+    Number.isFinite(expireAt) && Math.abs(expireAt - expectedExpiry) <= 3,
+    `${expireAt} vs ${expectedExpiry}`);
 
   console.log("== 建房 ==");
   a.send({ t: "room.create", name: "甲的房间", visibility: "public" });
@@ -162,6 +174,8 @@ try {
   const health = await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.json());
   check("/health 正常", health.ok === true && health.rooms === 1 && health.clients === 4,
     JSON.stringify(health));
+  check("/health 汇报 STUN 与 TURN 都已启用", health.stun === 1 && health.turn === 1,
+    JSON.stringify({ stun: health.stun, turn: health.turn }));
 
   console.log("== 房主离开 ==");
   a.send({ t: "room.leave" });
@@ -191,6 +205,55 @@ try {
   check("测试流程完成", false, String(error && error.stack || error));
 } finally {
   await close();
+}
+
+// 第二轮：TURN 的配置边界。server.mjs 是单例，所以先关掉再换参数重启。
+console.log("== TURN 配置边界 ==");
+try {
+  const port2 = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "stun:stun.example.test:3478",
+    turnUrl: "turn:turn.example.test:3478?transport=udp, turn:turn.example.test:3478?transport=tcp",
+    turnSecret: "another-secret",
+    turnTtl: 3600,
+  });
+  const e = await connect(port2);
+  e.send({ t: "hello", proto: 1, name: "边界" });
+  const welcome2 = await e.next();
+  const turn2 = ((welcome2.ice && welcome2.ice.servers) || [])
+    .find((s) => String(s.urls).includes("turn:"));
+  check("多条 TURN_URL 合并成一个 urls 数组",
+    !!turn2 && Array.isArray(turn2.urls) && turn2.urls.length === 2,
+    JSON.stringify(turn2 && turn2.urls));
+  const expire2 = Number(String(turn2 && turn2.username).split(":")[0]);
+  check("TURN_TTL 生效（3600 秒）",
+    Math.abs(expire2 - (Math.floor(Date.now() / 1000) + 3600)) <= 3,
+    String(expire2));
+  const health2 = await fetch(`http://127.0.0.1:${port2}/health`).then((r) => r.json());
+  check("/health 的 turn 计数是 2", health2.turn === 2, JSON.stringify(health2));
+
+  e.close();
+  await close();
+
+  const port3 = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "stun:stun.example.test:3478",
+    turnUrl: "turn:turn.example.test:3478",
+    turnSecret: "",
+  });
+  const f = await connect(port3);
+  f.send({ t: "hello", proto: 1, name: "无密钥" });
+  const welcome3 = await f.next();
+  const list3 = (welcome3.ice && welcome3.ice.servers) || [];
+  check("只给 TURN_URL 不给 secret 时不下发 TURN",
+    !list3.some((s) => String(s.urls).includes("turn:")),
+    JSON.stringify(list3.map((s) => s.urls)));
+  f.close();
+  await close();
+} catch (error) {
+  check("TURN 边界用例完成", false, String(error && error.stack || error));
 }
 
 console.log("");
