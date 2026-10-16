@@ -28,9 +28,9 @@
     capture-2.mp3  impact-sounds Audio/impactWood_heavy_003.ogg
     capture-3.mp3  casino-audio  Audio/chips-collide-2.ogg
 
-  发言提醒 (notify，尚未接入，等选定后再内联)
+  发言提醒 (notify —— 已选用 notify-2，内联进 ai-data.js)
     notify-1.mp3   interface-sounds Audio/confirmation_001.ogg   确认提示
-    notify-2.mp3   interface-sounds Audio/glass_002.ogg          清脆玻璃
+    notify-2.mp3   interface-sounds Audio/glass_002.ogg          清脆玻璃   ← 选用
     notify-3.mp3   interface-sounds Audio/pluck_001.ogg          拨弦（轻）
     notify-4.mp3   interface-sounds Audio/question_001.ogg       上扬疑问
     notify-5.mp3   interface-sounds Audio/bong_001.ogg           低音沉稳
