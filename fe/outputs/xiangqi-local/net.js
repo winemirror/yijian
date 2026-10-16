@@ -152,6 +152,11 @@
       return true;
     }
 
+    // 发不出去就当场报错，别让调用方傻等超时。
+    function postOrThrow(message) {
+      if (!post(message)) throw new Error("signalling-not-ready");
+    }
+
     // Resolves on the next message of `type`, or on any `error` so a server
     // rejection surfaces as an exception instead of a timeout.
     function waitFor(type, timeoutMs) {
@@ -173,6 +178,10 @@
           scope.clearTimeout(timer);
           resolve(message);
         };
+        waiter.reject = function (error) {
+          scope.clearTimeout(timer);
+          reject(error);
+        };
         waiters.push(waiter);
       });
     }
@@ -191,6 +200,16 @@
         }
       }
       inbox.push(message);
+    }
+
+    // 连接断了就别让调用方干等到超时：手机把页面切到后台时 iOS 会直接掐掉
+    // WebSocket，此时 post() 会静默失败，等满 8 秒只会得到一句没头绪的
+    // "server timeout"。这里统一把在等的请求直接判失败。
+    function failWaiters(reason) {
+      var pending = waiters.splice(0, waiters.length);
+      for (var index = 0; index < pending.length; index += 1) {
+        if (pending[index].reject) pending[index].reject(new Error(reason));
+      }
     }
 
     function connect() {
@@ -214,6 +233,17 @@
         };
         ws.onerror = function () {
           reject(new Error("server unreachable"));
+        };
+        ws.onclose = function () {
+          // 允许下一次 connect() 重新开一条；否则 readyPromise 会一直是
+          // 这条已死连接的 promise，重连永远发生不了。
+          if (socket === ws) {
+            socket = null;
+            readyPromise = null;
+            infoPromise = null;
+          }
+          failWaiters("signalling-closed");
+          emitDebug("signalling-down", {});
         };
         ws.onmessage = function (event) {
           var message = null;
@@ -268,12 +298,12 @@
       poll: function () { return Promise.resolve({ cursor: 0, blobs: [] }); },
       rooms: function () {
         return connect()
-          .then(function () { post({ t: "room.list" }); return waitFor("room.list"); })
+          .then(function () { postOrThrow({ t: "room.list" }); return waitFor("room.list"); })
           .then(function (message) { return expect(message).rooms || []; });
       },
       announce: function (room) {
         return connect().then(function () {
-          post({ t: "room.create", name: room && room.name, visibility: "public" });
+          postOrThrow({ t: "room.create", name: room && room.name, visibility: "public" });
           return waitFor("room.joined");
         }).then(function (message) {
           expect(message);
@@ -294,7 +324,12 @@
       // Server mode only: join by room code and learn which peer is the hub.
       joinSignalling: function (code, want) {
         return connect().then(function () {
-          post({
+          // 先探一次半开连接：手机切后台后 NAT 映射可能已经失效，本地 socket
+          // 还显示 open，发出去的报文却石沉大海。ping 不通就往上抛，让上层重连。
+          post({ t: "ping", at: now() });
+          return waitFor("pong", 2500);
+        }).then(function () {
+          postOrThrow({
             t: "room.join",
             roomId: String(code || "").toUpperCase(),
             want: want === "spectate" ? "spectate" : "play"
@@ -1075,6 +1110,16 @@
     // Server mode: join by room code. Everyone dials the room's host, exactly
     // like the LAN path does.
     joinByCode: function (code, options) {
+      var want = options && options.want;
+      function joinOnce() {
+        return state.transport.joinSignalling(code, want);
+      }
+      // 手机切到后台再回来时，信令 socket 常常已经被系统掐掉，第一次必然失败。
+      // 这类错误重连一次就能好，不该让用户重新点一遍。
+      function isTransportError(error) {
+        return /signalling-not-ready|signalling-closed|server unreachable|no-websocket|timeout: pong/
+          .test(describe(error));
+      }
       return api.ready().then(function () {
         if (!state.transport || typeof state.transport.joinSignalling !== "function") {
           fail("no-server");
@@ -1089,7 +1134,21 @@
         state.phase = "connecting";
         state.error = "";
         if (state.transport.onBlob) state.transport.onBlob(handleBlob);
-        return state.transport.joinSignalling(code, options && options.want)
+        return joinOnce()
+          .catch(function (error) {
+            if (!isTransportError(error)) throw error;
+            emitDebug("signalling-retry", {});
+            resetTransport();
+            state.room = { id: String(code || "").toUpperCase(), name: "", role: "guest" };
+            state.phase = "connecting";
+            return api.ready().then(function () {
+              if (!state.transport || typeof state.transport.joinSignalling !== "function") {
+                throw new Error("no-server");
+              }
+              if (state.transport.onBlob) state.transport.onBlob(handleBlob);
+              return joinOnce();
+            });
+          })
           .then(function (info) {
             state.room = { id: info.room.id, name: info.room.name, role: "guest" };
             var hostId = info.hostId;

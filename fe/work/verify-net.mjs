@@ -637,6 +637,104 @@ try {
   check("TURN 探测用例完成", false, String(error && error.stack || error));
 }
 
+console.log("== net.js: 信令 socket 断线后重连重试 ==");
+try {
+  // mode: "close-on-join" 明确收到 close；"half-open" 本地看着还活着但报文沉底。
+  function makeFlakyFactory(mode) {
+    const instances = [];
+    class FlakyWS {
+      constructor(url) {
+        this.url = url;
+        this.readyState = 0;
+        this.onopen = null;
+        this.onmessage = null;
+        this.onerror = null;
+        this.onclose = null;
+        this.index = instances.length;
+        instances.push(this);
+        const self = this;
+        setTimeout(function () {
+          self.readyState = 1;
+          if (self.onopen) self.onopen({});
+        }, 0);
+      }
+
+      deliver(message) {
+        if (this.onmessage) this.onmessage({ data: JSON.stringify(message) });
+      }
+
+      kill() {
+        this.readyState = 3;
+        if (this.onclose) this.onclose({});
+      }
+
+      send(raw) {
+        const message = JSON.parse(raw);
+        const self = this;
+        setTimeout(function () {
+          if (message.t === "hello") {
+            self.deliver({
+              t: "welcome",
+              proto: 1,
+              clientId: "c" + self.index,
+              ice: { servers: [{ urls: "stun:stun.test:3478" }] }
+            });
+            return;
+          }
+          if (message.t === "ping") {
+            // 半开连接：第一条 socket 什么都不回，报文进了黑洞。
+            if (self.index === 0 && mode === "half-open") return;
+            self.deliver({ t: "pong", at: message.at });
+            return;
+          }
+          if (message.t !== "room.join") return;
+          if (self.index === 0 && mode === "close-on-join") { self.kill(); return; }
+          self.deliver({
+            t: "room.joined",
+            room: { id: "ABC123", name: "重试房", hostId: "host-1" },
+            self: { id: "c" + self.index, kind: "player" },
+            peers: [{ id: "host-1", name: "房主", kind: "player" }]
+          });
+        }, 0);
+      }
+
+      close() { this.readyState = 3; }
+    }
+    return { instances: instances, WebSocket: FlakyWS };
+  }
+
+  // 1) socket 被系统明确掐掉（onclose 会到）：应当立刻失败并重连，而不是等 8 秒。
+  const closed = makeFlakyFactory("close-on-join");
+  const netA = loadNet(makeFakeWebRTC(), "flaky-close", closed);
+  await netA.setServer("ws://fake.test/ws");
+  await netA.ready();
+  let started = Date.now();
+  const statusA = await netA.joinByCode("ABC123", { want: "play" });
+  const elapsedA = Date.now() - started;
+  check("socket 被掐掉时立刻失败而不是干等 8 秒", elapsedA < 3000, `${elapsedA}ms`);
+  check("自动重连后加入成功（onclose 路径）",
+    !!statusA.room && statusA.room.id === "ABC123" && statusA.phase !== "error",
+    JSON.stringify({ phase: statusA.phase, room: statusA.room }));
+  check("确实重开了新的信令 socket", closed.instances.length >= 2,
+    String(closed.instances.length));
+
+  // 2) 半开连接（本地 readyState 还是 open，报文其实发不出去）：ping 探测兜住。
+  const half = makeFlakyFactory("half-open");
+  const netB = loadNet(makeFakeWebRTC(), "flaky-half", half);
+  await netB.setServer("ws://fake.test/ws");
+  await netB.ready();
+  started = Date.now();
+  const statusB = await netB.joinByCode("ABC123", { want: "play" });
+  const elapsedB = Date.now() - started;
+  check("半开连接由 ping 探测发现（没有干等 8 秒）",
+    elapsedB >= 2400 && elapsedB < 6000, `${elapsedB}ms`);
+  check("半开连接重连后也能加入成功",
+    !!statusB.room && statusB.room.id === "ABC123" && statusB.phase !== "error",
+    JSON.stringify({ phase: statusB.phase, room: statusB.room }));
+} catch (error) {
+  check("断线重连用例完成", false, String(error && error.stack || error));
+}
+
 console.log("== net.js: host serves an opponent and a spectator ==");
 try {
   const webRTC = makeFakeWebRTC();

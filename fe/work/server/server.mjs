@@ -207,6 +207,9 @@ function send(client, message) {
 
 function sendError(client, code, message) {
   send(client, { t: "error", code, message });
+  // 失败的请求也要留痕：以前只有成功的 join 会写日志，
+  // 出问题时从服务端看不出"客户端到底有没有发过来"。
+  log(`error ${code} -> ${client.id}`);
 }
 
 function peerInfo(client) {
@@ -349,7 +352,9 @@ function handleMessage(client, raw) {
     case "room.join": {
       if (!client.helloed) return sendError(client, "not_helloed", "send hello first");
       if (client.roomId) return sendError(client, "already_in_room", "leave the current room");
-      const room = rooms.get(String(message.roomId || "").toUpperCase());
+      const wanted = String(message.roomId || "").toUpperCase();
+      log(`room.join ${wanted} <- ${client.id}`);
+      const room = rooms.get(wanted);
       if (!room) return sendError(client, "no_room", "房间不存在或已结束");
       const kind = message.want === "spectate" ? "spectator" : "player";
       if (kind === "player") {
