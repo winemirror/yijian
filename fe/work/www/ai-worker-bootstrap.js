@@ -1,5 +1,6 @@
 try {
-  importScripts("ai-data.js", "app.js");
+  var assetVersion = self.location && self.location.search ? self.location.search : "";
+  importScripts("ai-data.js" + assetVersion, "app.js" + assetVersion);
 } catch (error) {
   self.postMessage({
     type: "bootstrap-error",

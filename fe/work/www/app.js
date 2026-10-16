@@ -7,6 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
+  const APP_ASSET_VERSION = "3.2.0-20261016";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2212,7 +2213,7 @@
     }
 
     createWorker() {
-      const worker = new Worker("ai-worker-bootstrap.js", { name: "xiangqi-ai" });
+      const worker = new Worker("ai-worker-bootstrap.js?v=" + APP_ASSET_VERSION, { name: "xiangqi-ai" });
       worker.onmessage = (event) => this.handleMessage(worker, event.data);
       worker.onerror = (event) => this.handleError(worker, event);
       worker.postMessage({ type: "warmup" });
@@ -4192,15 +4193,25 @@
 
   const NET_MODE_KEY = "xiangqi.net.mode";
   const NET_SERVER_KEY = "xiangqi.net.server";
+  const DEFAULT_NET_SERVER = "wss://c.syjnb.top/ws";
+
+  function defaultNetMode() {
+    const isBlogWeb = GLOBAL_SCOPE.location.protocol === "https:" && GLOBAL_SCOPE.location.hostname === "web.syjnb.top";
+    return {
+      mode: isBlogWeb ? "server" : "lan",
+      server: DEFAULT_NET_SERVER
+    };
+  }
 
   function loadNetMode() {
     try {
+      const fallback = defaultNetMode();
       return {
-        mode: localStorage.getItem(NET_MODE_KEY) || "lan",
-        server: localStorage.getItem(NET_SERVER_KEY) || ""
+        mode: localStorage.getItem(NET_MODE_KEY) || fallback.mode,
+        server: localStorage.getItem(NET_SERVER_KEY) || fallback.server
       };
     } catch (error) {
-      return { mode: "lan", server: "" };
+      return defaultNetMode();
     }
   }
 
@@ -4303,6 +4314,21 @@
     } catch (error) {
       netLog("自检异常：" + defaultTo(error && error.message, "unknown"));
     }
+    // TURN 单独自检：直连失败时它就是唯一能救场的通道，值得单独验一次。
+    if (Net && typeof Net.turnCheck === "function") {
+      try {
+        const turn = await Net.turnCheck();
+        if (turn && turn.ok) {
+          netLog("中继自检：TURN 可用（已拿到中继候选）");
+        } else if (turn && turn.reason === "no-turn-configured") {
+          netLog("中继自检：未配置 TURN，只能直连");
+        } else {
+          netLog("中继自检：TURN 不可用（" + defaultTo(turn && turn.reason, "unknown") + "）");
+        }
+      } catch (error) {
+        netLog("中继自检异常：" + defaultTo(error && error.message, "unknown"));
+      }
+    }
     if (typeof Net.status === "function") {
       const status = Net.status();
       if (status && status.localIps && status.localIps.length) {
@@ -4334,6 +4360,9 @@
         break;
       case "candidate":
         netLog("本机候选：" + (detail.text || ""));
+        break;
+      case "relay":
+        netLog("已获得中继候选（TURN 中继可用）");
         break;
       case "connected":
         netLog(detail.kind === "spectator" ? "观众已连上" : "点对点通道已建立");

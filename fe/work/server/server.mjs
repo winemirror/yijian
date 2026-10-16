@@ -3,7 +3,7 @@
 // 只做三件事：
 //   1. 房间登记（建房 / 房间码 / 公开房间列表）
 //   2. 信令中转（转发 offer / answer / ice 这些不透明 blob，服务端不解析）
-//   3. 下发 ICE 配置（STUN；将来加 TURN 时只改这里）
+//   3. 下发 ICE 配置（STUN + coturn REST 临时凭证的 TURN）
 //
 // 棋局数据一律走 WebRTC DataChannel，服务端不碰、不存。
 //
@@ -14,8 +14,10 @@
 // 环境变量：
 //   PORT          监听端口，默认 8787
 //   STUN_URL      形如 stun:turn.example.com:3478，留空则不下发 STUN（仅局域网可用）
-//   TURN_URL / TURN_SECRET / TURN_TTL
-//                 预留：配了这三项就下发带临时凭证的 TURN
+//   TURN_URL      中继地址，逗号分隔可给多条，例如
+//                 turn:1.2.3.4:3478?transport=udp,turn:1.2.3.4:3478?transport=tcp
+//   TURN_SECRET   必须与 coturn 的 static-auth-secret 一致；留空则不下发 TURN
+//   TURN_TTL      临时凭证有效期（秒），默认 600，会夹到 60 ~ 86400
 //   MAX_ROOMS     同时存在的房间上限，默认 500
 //   ROOM_TTL_MS   房间空闲多久后回收，默认 30 分钟
 
@@ -26,9 +28,10 @@ import { pathToFileURL } from "node:url";
 let PORT = Number(process.env.PORT || 8787);
 let HOST = process.env.HOST || "0.0.0.0";
 let STUN_URL = (process.env.STUN_URL || "").trim();
+// TURN_URL 支持逗号分隔多条，例如同时下发 udp 与 tcp 两种中继地址。
 let TURN_URL = (process.env.TURN_URL || "").trim();
 let TURN_SECRET = (process.env.TURN_SECRET || "").trim();
-const TURN_TTL = Number(process.env.TURN_TTL || 600);
+let TURN_TTL = Number(process.env.TURN_TTL || 600);
 const MAX_ROOMS = Number(process.env.MAX_ROOMS || 500);
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 30 * 60 * 1000);
 
@@ -164,15 +167,34 @@ const clients = new Map();   // socket -> client
 function iceServers() {
   const servers = [];
   if (STUN_URL) servers.push({ urls: STUN_URL });
-  if (TURN_URL && TURN_SECRET) {
-    const username = `${Math.floor(Date.now() / 1000) + TURN_TTL}:yijian`;
+  const urls = turnUrls();
+  if (urls.length && TURN_SECRET) {
+    // coturn 的 REST 临时凭证：username 形如 "<过期unix时间戳>:<任意串>"，
+    // credential = base64(HMAC-SHA1(static-auth-secret, username))。
+    // 服务端即时计算、只在内存里存在，客户端拿到的是分钟级有效的一次性凭证。
+    const username = `${Math.floor(Date.now() / 1000) + turnTtlSeconds()}:${crypto.randomBytes(6).toString("hex")}`;
     const credential = crypto
       .createHmac("sha1", TURN_SECRET)
       .update(username)
       .digest("base64");
-    servers.push({ urls: TURN_URL, username, credential });
+    servers.push({ urls: urls.length === 1 ? urls[0] : urls, username, credential });
   }
   return servers;
+}
+
+// TURN_URL 允许多条（逗号分隔），一条时保持字符串形状。
+function turnUrls() {
+  return String(TURN_URL || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+// 凭证有效期：coturn 只校验 username 里的时间戳，夹到 1 分钟 ~ 24 小时之间，
+// 免得配错成 0（立刻过期）或过大（凭证长期有效）。
+function turnTtlSeconds() {
+  if (!Number.isFinite(TURN_TTL)) return 600;
+  return Math.min(86400, Math.max(60, Math.floor(TURN_TTL)));
 }
 
 function send(client, message) {
@@ -386,7 +408,9 @@ const server = http.createServer((request, response) => {
       proto: PROTO,
       rooms: rooms.size,
       clients: clients.size,
-      ice: iceServers().length
+      ice: iceServers().length,
+      stun: STUN_URL ? 1 : 0,
+      turn: turnUrls().length && TURN_SECRET ? turnUrls().length : 0
     }));
     return;
   }
@@ -489,13 +513,16 @@ export function listen(overrides = {}) {
   if (overrides.stunUrl !== undefined) STUN_URL = overrides.stunUrl;
   if (overrides.turnUrl !== undefined) TURN_URL = overrides.turnUrl;
   if (overrides.turnSecret !== undefined) TURN_SECRET = overrides.turnSecret;
+  if (overrides.turnTtl !== undefined) TURN_TTL = overrides.turnTtl;
 
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(PORT, HOST, () => {
       const address = server.address();
       log(`yijian signalling server listening on ${HOST}:${address.port}`);
-      log(`ice: ${iceServers().length} server(s)${STUN_URL ? "" : " (no STUN configured)"}`);
+      const turnCount = turnUrls().length && TURN_SECRET ? turnUrls().length : 0;
+      log(`ice: stun=${STUN_URL ? 1 : 0} turn=${turnCount} ttl=${turnTtlSeconds()}s`);
+      if (!STUN_URL) log("warning: no STUN configured - public play will fail");
       resolve(address.port);
     });
   });
