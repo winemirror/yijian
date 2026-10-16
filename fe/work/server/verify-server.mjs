@@ -256,6 +256,70 @@ try {
   check("TURN 边界用例完成", false, String(error && error.stack || error));
 }
 
+// 第三轮：房间密码。
+console.log("== 房间密码 ==");
+try {
+  const port4 = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "stun:stun.example.test:3478",
+    turnUrl: "",
+    turnSecret: "",
+  });
+
+  const host = await connect(port4);
+  host.send({ t: "hello", proto: 1, name: "房主" });
+  await host.next();
+  host.send({ t: "room.create", name: "上锁房", visibility: "public", password: "s3cret" });
+  const createdLocked = await host.next();
+  const lockedCode = createdLocked.room && createdLocked.room.id;
+  check("可以创建带密码的房间", createdLocked.t === "room.joined", createdLocked.t);
+
+  const lister = await connect(port4);
+  lister.send({ t: "hello", proto: 1, name: "路人" });
+  await lister.next();
+  lister.send({ t: "room.list" });
+  const listed = await lister.next();
+  const entry = (listed.rooms || []).find((room) => room.id === lockedCode);
+  check("房间列表里能看出房间是否上锁", !!entry && entry.locked === true,
+    JSON.stringify(entry));
+
+  lister.send({ t: "room.join", roomId: lockedCode, want: "play" });
+  const noPassword = await lister.next();
+  check("不给密码时被拒绝",
+    noPassword.t === "error" && noPassword.code === "bad_password", JSON.stringify(noPassword));
+
+  lister.send({ t: "room.join", roomId: lockedCode, want: "play", password: "wrong" });
+  const wrongPassword = await lister.next();
+  check("密码错误时被拒绝",
+    wrongPassword.t === "error" && wrongPassword.code === "bad_password",
+    JSON.stringify(wrongPassword));
+
+  lister.send({ t: "room.join", roomId: lockedCode, want: "play", password: "s3cret" });
+  const rightPassword = await lister.next();
+  check("密码正确时可以加入",
+    rightPassword.t === "room.joined" && rightPassword.room.id === lockedCode,
+    JSON.stringify(rightPassword.room));
+
+  const openRoom = await connect(port4);
+  openRoom.send({ t: "hello", proto: 1, name: "公开房主" });
+  await openRoom.next();
+  openRoom.send({ t: "room.create", name: "公开房", visibility: "public" });
+  const createdOpen = await openRoom.next();
+  openRoom.send({ t: "room.list" });
+  const listedOpen = await openRoom.next();
+  const openEntry = (listedOpen.rooms || []).find((room) => room.id === createdOpen.room.id);
+  check("没设密码的房间 locked 为 false", !!openEntry && openEntry.locked === false,
+    JSON.stringify(openEntry));
+
+  host.close();
+  lister.close();
+  openRoom.close();
+  await close();
+} catch (error) {
+  check("房间密码用例完成", false, String(error && error.stack || error));
+}
+
 console.log("");
 if (problems.length === 0) {
   console.log("SERVER CHECKS PASSED");

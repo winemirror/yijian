@@ -39,9 +39,9 @@ node server.mjs
 ```
 { t:"hello",       proto:1, name }
 { t:"ice" }                                    // 需要时重新取 ICE 配置
-{ t:"room.create", name, visibility:"public"|"private" }
+{ t:"room.create", name, visibility:"public"|"private", password? }
 { t:"room.list" }
-{ t:"room.join",   roomId, want:"play"|"spectate" }
+{ t:"room.join",   roomId, want:"play"|"spectate", password? }
 { t:"room.leave" }
 { t:"signal",      to:"<peerId>", data:<不透明 JSON> }
 { t:"ping", at }
@@ -54,7 +54,7 @@ node server.mjs
 { t:"ice",         servers:[…] }
 { t:"room.joined", room:{id,name,hostId}, self:{id,kind}, peers:[{id,name,kind}] }
 { t:"room.left" } / { t:"room.closed", roomId, reason }
-{ t:"room.list",   rooms:[{id,name,players,spectators,private}] }
+{ t:"room.list",   rooms:[{id,name,players,spectators,private,locked}] }
 { t:"peer.join",   peer } / { t:"peer.leave", peerId }
 { t:"signal",      from:"<peerId>", data }
 { t:"error",       code, message } / { t:"pong", at }
@@ -63,6 +63,9 @@ node server.mjs
 规则：
 
 - 房间码 6 位，字符集 `23456789ABCDEFGHJKMNPQRSTUVWXYZ`（去掉 0/O/1/I/L）。
+- 房间可以带密码：`room.create` 传 `password` 即为上锁房间，服务端只存
+  `sha256("<房间码>\n<密码>")`（房间码当盐，不存明文）；`room.join` 密码不对回
+  `error code=bad_password`。`room.list` 用 `locked` 标记上锁房间（不下发任何密码信息）。
 - 最多 2 名棋手；第 3 个 `want:"play"` 会收到 `error code=room_full`，改用 `spectate` 可进。
 - **房主离开 = 房间解散**，其余成员收到 `room.closed`（对局本来也无法继续）。
 - `signal` 只允许房间内互发；`data` 原样透传，服务端不解析。
@@ -168,11 +171,11 @@ ufw allow 49160:49200/udp
 - 证书有效（`wss` 不能被浏览器拦）；
 - 若主机在中国大陆，域名需 **ICP 备案**；后续做账号注册还要考虑实名要求。
 
-## 已知限制（3.2）
+## 已知限制（3.4）
 
 - TURN 已启用，但中继带宽就是这台 VPS 的带宽：两端都在 CGNAT 后面时会全程走中继，
   流量和延迟都比直连差。家用宽带之间多数仍会直连成功。
 - 中继端口段按 `coturn.conf` 的 min-port/max-port 限制并发路数，
   人多时要么扩端口段，要么单独加一台 TURN。
-- 服务端不存棋局，重启会让在线房间失效（客户端重连重建即可）。
-- 房间无密码、无账号，靠房间码的随机性防误入。
+- 服务端不存棋局，重启会让在线房间失效（房间码与密码一并失效，客户端重连重建即可）。
+- 房间密码只用于挡误入：服务端不限制试错次数，也不做账号体系；房间码的随机性仍是主要防线。

@@ -15,7 +15,13 @@ $pairs = @(
     @("impact-sounds\Audio\impactPlank_medium_001.ogg", "place-4.mp3"),
     @("impact-sounds\Audio\impactWood_heavy_000.ogg",   "capture-1.mp3"),
     @("impact-sounds\Audio\impactWood_heavy_003.ogg",   "capture-2.mp3"),
-    @("casino-audio\Audio\chips-collide-2.ogg",         "capture-3.mp3")
+    @("casino-audio\Audio\chips-collide-2.ogg",         "capture-3.mp3"),
+    # 发言提醒（对手说话 / 催促走棋时的提示音）
+    @("interface-sounds\Audio\confirmation_001.ogg",    "notify-1.mp3"),
+    @("interface-sounds\Audio\glass_002.ogg",           "notify-2.mp3"),
+    @("interface-sounds\Audio\pluck_001.ogg",           "notify-3.mp3"),
+    @("interface-sounds\Audio\question_001.ogg",        "notify-4.mp3"),
+    @("interface-sounds\Audio\bong_001.ogg",            "notify-5.mp3")
 )
 
 foreach ($pair in $pairs) {

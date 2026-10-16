@@ -234,8 +234,29 @@ function roomSummary(room) {
     name: room.name,
     players: members.filter((m) => m.kind === "player").length,
     spectators: members.filter((m) => m.kind === "spectator").length,
-    private: room.visibility !== "public"
+    private: room.visibility !== "public",
+    locked: !!room.passwordHash
   };
+}
+
+// 房间密码只在内存里存哈希，不存明文。用房间码当盐，避免两个房间
+// 用了同一个密码就得到同一个哈希。
+function hashPassword(roomId, password) {
+  return crypto
+    .createHash("sha256")
+    .update(`${roomId}\n${password}`)
+    .digest("hex");
+}
+
+function passwordOf(message) {
+  if (typeof message.password !== "string") return "";
+  return message.password.trim().slice(0, 64);
+}
+
+function passwordMatches(room, password) {
+  if (!room.passwordHash) return true;
+  if (!password) return false;
+  return hashPassword(room.id, password) === room.passwordHash;
 }
 
 function leaveRoom(client, reason) {
@@ -323,12 +344,14 @@ function handleMessage(client, raw) {
         return sendError(client, "too_many_rooms", "slow down");
       }
       const id = makeRoomCode();
+      const password = passwordOf(message);
       const room = {
         id,
         name: typeof message.name === "string" && message.name.trim()
           ? message.name.trim().slice(0, 24)
           : `房间 ${id}`,
         visibility: message.visibility === "public" ? "public" : "private",
+        passwordHash: password ? hashPassword(id, password) : "",
         hostId: client.id,
         createdAt: Date.now(),
         lastActiveAt: Date.now(),
@@ -337,7 +360,7 @@ function handleMessage(client, raw) {
       rooms.set(id, room);
       client.roomsCreated += 1;
       joinRoom(client, room, "player");
-      log(`room ${id} created by ${client.id}`);
+      log(`room ${id} created by ${client.id}${password ? " (locked)" : ""}`);
       return;
     }
 
@@ -356,6 +379,9 @@ function handleMessage(client, raw) {
       log(`room.join ${wanted} <- ${client.id}`);
       const room = rooms.get(wanted);
       if (!room) return sendError(client, "no_room", "房间不存在或已结束");
+      if (!passwordMatches(room, passwordOf(message))) {
+        return sendError(client, "bad_password", "房间密码不正确");
+      }
       const kind = message.want === "spectate" ? "spectator" : "player";
       if (kind === "player") {
         const players = membersOf(room).filter((member) => member.kind === "player");

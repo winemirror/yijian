@@ -1150,7 +1150,7 @@ select:focus {
 .quick-chat {
   margin-top: 9px;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
   gap: 6px;
   grid-gap: 6px;
 }
@@ -1168,6 +1168,18 @@ select:focus {
 .quick-chat button:hover {
   border-color: #a99f90;
   color: var(--ink);
+}
+
+/* 「催一下」是动作而不是口头禅，给它一点强调色。 */
+.quick-chat button.nudge {
+  border-color: #ddc9a5;
+  background: #fdf5e8;
+  color: var(--amber);
+}
+
+.quick-chat button.nudge:hover {
+  border-color: var(--amber);
+  color: #8a5620;
 }
 
 .chat-form {

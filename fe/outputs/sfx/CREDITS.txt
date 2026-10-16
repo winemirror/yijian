@@ -4,6 +4,7 @@
 
   Impact Sounds (1.0)      https://kenney.nl/assets/impact-sounds
   Casino Audio             https://kenney.nl/assets/casino-audio
+  Interface Sounds (1.0)   https://kenney.nl/assets/interface-sounds
 
 授权: Creative Commons Zero, CC0 1.0 Universal
       http://creativecommons.org/publicdomain/zero/1.0/
@@ -26,6 +27,13 @@
     capture-1.mp3  impact-sounds Audio/impactWood_heavy_000.ogg
     capture-2.mp3  impact-sounds Audio/impactWood_heavy_003.ogg
     capture-3.mp3  casino-audio  Audio/chips-collide-2.ogg
+
+  发言提醒 (notify，尚未接入，等选定后再内联)
+    notify-1.mp3   interface-sounds Audio/confirmation_001.ogg   确认提示
+    notify-2.mp3   interface-sounds Audio/glass_002.ogg          清脆玻璃
+    notify-3.mp3   interface-sounds Audio/pluck_001.ogg          拨弦（轻）
+    notify-4.mp3   interface-sounds Audio/question_001.ogg       上扬疑问
+    notify-5.mp3   interface-sounds Audio/bong_001.ogg           低音沉稳
 
 处理方式: ffmpeg 转为单声道 44.1kHz MP3，96kbps，未做增益或音高处理。
 原始 .ogg 文件与完整音效包保存在 work/sfx/packs/ 下，随时可重新导出。

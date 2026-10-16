@@ -88,7 +88,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=3.3.0-20261016">
+  <link rel="stylesheet" href="styles.css?v=3.4.0-20261016">
 </head>
 <body>
   <noscript>
@@ -323,6 +323,7 @@
             <button type="button" data-chat="承让">承让</button>
             <button type="button" data-chat="再想想">再想想</button>
             <button type="button" data-chat="精彩">精彩</button>
+            <button type="button" id="chatNudge" class="nudge" title="提醒对手该走棋了">催一下</button>
           </div>
           <form id="chatForm" class="chat-form">
             <input id="chatInput" type="text" maxlength="80" placeholder="说点什么">
@@ -360,6 +361,10 @@
                 <span>房间名</span>
                 <input id="netRoomName" type="text" maxlength="20" value="我的棋局">
               </label>
+              <label class="field" id="netPasswordField" hidden>
+                <span>房间密码</span>
+                <input id="netRoomPassword" type="text" maxlength="32" placeholder="留空则不设密码">
+              </label>
               <label class="field">
                 <span>我方执棋</span>
                 <select id="netSide">
@@ -373,7 +378,7 @@
 
             <div class="section-block">
               <div class="section-head">
-                <h2>局域网房间</h2>
+                <h2 id="netRoomsTitle">房间列表</h2>
                 <button id="netSelfTest" class="btn small" type="button">网络自检</button>
                 <button id="netRefresh" class="btn small" type="button">刷新</button>
               </div>
@@ -411,8 +416,8 @@
     </main>
   </div>
 
-  <script src="ai-data.js?v=3.3.0-20261016"></script>
-  <script src="net.js?v=3.3.0-20261016"></script>
-  <script src="app.js?v=3.3.0-20261016"></script>
+  <script src="ai-data.js?v=3.4.0-20261016"></script>
+  <script src="net.js?v=3.4.0-20261016"></script>
+  <script src="app.js?v=3.4.0-20261016"></script>
 </body>
 </html>
