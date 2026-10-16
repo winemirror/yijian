@@ -1,72 +1,48 @@
-弈鉴 · 3.4 构建信息（2026-10-16）
+弈鉴 · 3.5 构建信息（2026-10-16）
 
 包名: com.yijian.xiangqi
-版本: 3.4 (versionCode 33)
+版本: 3.5 (versionCode 34)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.4.apk
+APK 文件: Yijian-Xiangqi-3.5.apk
+文件大小: 4364801 bytes
+SHA-256: F80538E41904704F58B45EA67F5E6E229532B8C9BFEDF459FCE96660A41B846D
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 482304 bytes
+SHA-256: 81487B656AB9589FE70D73807E3492A76DE09ECDA0C4E2FF888623CA1395A102
+
+上一版: Yijian-Xiangqi-3.4.apk
 文件大小: 4362985 bytes
 SHA-256: 178DCA21F2B114E5BFA647809AE9AC95175B961836FE0404B4DB8951B624B96C
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 479232 bytes
-SHA-256: 80A88E72758D9EE76BF8C7352569DA22CF6EB686D42A31F4F352187E2A526198
+本次改动: 发言提醒音效正式接入（选定 notify-2）
 
-上一版: Yijian-Xiangqi-3.3.apk
-文件大小: 4360645 bytes
-SHA-256: 9712FC1CD56CFEE3B4CBF3451801DE65B316764BCD2FD8915E4B784C7DE6FD9E
-
-本次改动: 房间浏览器 + 房间密码 + 催促按钮 + 发言提醒音效接口
-
-1) 房间浏览器（服务器模式）
-   服务端本来就有 room.list，但客户端在服务器模式把房间列表整个藏起来了，只能靠抄房间码。
-   现在：
-   - net.js 新增 browse()：服务器模式走 room.list（统一成 {id,name,players,spectators,locked,server}），
-     局域网模式退回广播扫描（带 addr），UI 只用 server 字段区分怎么加入。
-   - app.js 的 netScan 改用 browse()，两种模式共用同一个列表渲染：
-     服务器房间显示「房间码 XXXXXX · 1/2 人 · 观众 N」，点加入/观战直接按房间码连。
-   - 刷新按钮与列表在服务器模式不再隐藏；自动刷新间隔按模式区分（局域网 2.5s，服务器 8s，
-     免得往服务端狂发 room.list）。
-
-2) 房间密码
-   - 服务端：room.create 接受 password；只存哈希 sha256("<房间码>\n<密码>")（用房间码当盐，
-     不存明文）；room.join 校验不通过回 error code=bad_password；room.list 里带 locked 标记。
-     观众同样需要密码。
-   - 客户端：创建房间处新增「房间密码」输入（留空则公开）。加入时若房间带锁会弹出输入框；
-     服务器判定密码错误时会再给一次输入机会。错误文案走已有的人话翻译。
-   - 密码只在服务器模式生效（局域网房间是广播发现，没有密码概念）。
-
-3) 催促对方行棋
-   - 聊天面板快捷按钮新增「催一下」（带强调色）。
-   - 发的是独立消息类型 nudge，只在两名棋手之间传递（不进转发白名单，观众看不到也不会被催）。
-   - 客户端 10 秒内只允许催一次，重复点击会在聊天区提示；收到方显示「对手催你快走棋」并播放提醒音。
-
-4) 发言提醒音效（接口就绪，素材待你选定）
-   - 收到对手聊天或催促时调用 playSound("notify")；音效开关沿用全局设置。
-   - 候选已生成，尚未内联：outputs/sfx/notify-1..5.mp3，
-     试听页 outputs/sfx/preview.html（新增「发言提醒」一节）。
-     来源 Kenney Interface Sounds（CC0），对应关系见 outputs/sfx/CREDITS.txt。
-   - 选定后我用 work/sfx/embed-sounds.mjs 把 notify 一并内联进 ai-data.js 即可，无需改代码逻辑。
+- 选定素材：outputs/sfx/notify-2.mp3（Kenney Interface Sounds · glass_002，CC0），
+  即试听页里的「清脆玻璃」。它同时用于对手发言提醒和「催一下」按钮。
+- work/sfx/embed-sounds.mjs 现在把 notify 一起内联（chosen 表里加了 notify: notify-2.mp3），
+  并改为「已有 sounds 块就整体替换」，因此可以反复执行而不会重复插入。
+- www/ai-data.js 的 sounds 现在是 4 个（pickup / place / capture / notify），
+  总字节数 23601；三份副本（www、android assets/public、outputs/xiangqi-local）
+  与 APK 内 assets/public/ai-data.js 的 SHA-256 全部一致：
+  65DF2CCB723E5B6487C63505DD7FD7008B5E220F498004AB8B223E563CC26CDB
+- 逻辑上一版就已接好（收到对手 chat / nudge 时 playSound("notify")），本版只是把音频补上，
+  所以现在真的会响了。
 
 验证:
-  verify-server 新增 6 项：创建带密码房间、列表带 locked、不给密码被拒、密码错误被拒、
-    密码正确可加入、未设密码的房间 locked=false。
-  verify-net 新增 4 项（走真实信令服务端）：带密码建房、browse() 能列出并标记上锁、
-    不带密码加入被拒、带正确密码加入成功。
-  六个套件全绿；perft(4) = 3290240。
-  额外静态检查：app.js 引用的 78 个元素 id 在 index.html 中全部存在。
+  verify-mate 更新为断言 4 个内联音频、四个键都存在、以及 app.js 里至少两处
+  playSound("notify")（chat 与 nudge）。六个套件全绿；perft(4) = 3290240。
+  node --check 通过；连续执行两次 embed-sounds.mjs，sounds 块数量仍为 1（幂等）。
 
 部署状态：已上线（2026-10-16）
-  - /opt/yijian/server.mjs 已更新并重启。
-  - /var/www/web.syjnb.top/yijian/ 已更新（静态资源版本 3.4.0-20261016）。
-  - 线上冒烟：带密码建房 → room.list 显示 locked → 无密码被拒(bad_password)
-    → 带密码加入成功。https://c.syjnb.top/health 返回 {"ice":2,"stun":1,"turn":2}。
+  - 网页端 /var/www/web.syjnb.top/yijian/ 已更新（资源版本 3.5.0-20261016），
+    线上 ai-data.js 的 sha256 与仓库一致（65df2ccb…），内联音频 4 个。
+  - 信令服务本次无改动，未重新部署。
 
-已知限制（3.4）:
-  - 房间密码只挡"误入"，服务端不做失败次数限制；房间码 + 密码都在内存里，服务重启即失效。
-  - 房间浏览器只列公开房间（private 房间不进列表，仍可用房间码加入）。
-  - 发言提醒音效尚未选定，当前收到消息不会发声。
+已知限制（3.5）:
+  - 提醒音只用于「对手发来消息 / 催促」，自己发消息不响；音效总开关关掉后所有音都不响。
+  - 其余四个候选（notify-1/3/4/5）仍保留在 outputs/sfx 下，想换随时说。
 
-说明: 基于 3.3 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.4 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。

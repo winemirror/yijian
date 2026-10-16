@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| 当前版本 | 3.4（versionCode 33） |
+| 当前版本 | 3.5（versionCode 34） |
 | 运行形态 | 浏览器离线版 / Windows 便携 EXE / Android APK |
 | 前端 | 原生 JavaScript，零框架、零构建步骤 |
 | 服务端 | Node.js，零依赖（WebSocket 按 RFC 6455 手写） |
@@ -404,7 +404,9 @@ NNUE 引擎的主要差距。
   只在两名棋手之间传递（观众看不到、也不会被催）；同一局里 10 秒内只能催一次，
   收到的一方会在聊天区看到「对手催你快走棋」并播放提醒音。
 - 发言提醒音效：收到对手聊天或催促时播放（音效关掉时不响）。
-  候选素材在 `outputs/sfx/notify-1..5.mp3`，试听页同 `preview.html` 的「发言提醒」一节。
+  3.5 起已内联选定的 `notify-2`（Kenney Interface Sounds · glass_002）；
+  想换的话改 `work/sfx/embed-sounds.mjs` 里的 `chosen.notify` 再跑一次即可，
+  其余候选仍在 `outputs/sfx/notify-1..5.mp3`。
 
 ---
 
@@ -540,7 +542,7 @@ $env:GRADLE_USER_HOME = "<可写的 Gradle Home>"
   并发路数受 `coturn.conf` 的 min-port/max-port 限制。
 - 服务器不持久化：重启后在线房间失效（房间码与密码一并失效），客户端重连重建即可。
 - **房间密码只挡误入**：服务端不限制试错次数，房间码本身仍是主要防线；房间列表只列公开房间。
-- **发言提醒音效待选定**：候选素材已生成，但还没内联，所以现在收到消息不会发声。
+- 提醒音只在**对手**发来消息或催促时响；自己发消息不响（音效总开关关掉后全都不响）。
 - 多 Worker 并行只做**根节点分片**，没有实现共享置换表或 Lazy SMP。
 - 本仓库工作站在 Windows 上；iOS 需要 Mac + Xcode 才能构建签名。
 
