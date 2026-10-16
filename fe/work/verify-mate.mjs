@@ -158,14 +158,16 @@ console.log("== sound wiring ==");
 {
   const clips = [...data.matchAll(/data:audio\/mpeg;base64,([A-Za-z0-9+/=]+)/g)];
   console.log(`  embedded clips: ${clips.length}`);
-  check("three clips are embedded", clips.length === 3, String(clips.length));
-  check("pickup / place / capture keys exist",
+  check("four clips are embedded", clips.length === 4, String(clips.length));
+  check("pickup / place / capture / notify keys exist",
     /pickup: "data:audio/.test(data) && /place: "data:audio/.test(data)
-    && /capture: "data:audio/.test(data));
+    && /capture: "data:audio/.test(data) && /notify: "data:audio/.test(data));
   check("sound toggle exists in the page", html.includes('id="soundToggle"'));
   check("playSound is exported", typeof engine.playSound === "function");
 
   const appSource = fs.readFileSync(path.join(here, "www", "app.js"), "utf8");
+  check("收到对手发言/催促时播提醒音",
+    (appSource.match(/playSound\("notify"\)/g) || []).length >= 2);
   check("clips play at 50% volume", /SOUND_VOLUME = 0\.5\b/.test(appSource));
   check("one shared volume for every clip",
     (appSource.match(/\.volume = SOUND_VOLUME/g) || []).length === 1);

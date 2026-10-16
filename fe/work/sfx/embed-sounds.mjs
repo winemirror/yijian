@@ -13,6 +13,8 @@ const chosen = {
   pickup: "pickup-2.mp3",
   place: "place-2.mp3",
   capture: "capture-3.mp3",
+  // 发言提醒：对手发消息或催你走棋时
+  notify: "notify-2.mp3",
 };
 
 const lines = Object.entries(chosen).map(([key, file]) => {
@@ -23,14 +25,20 @@ const lines = Object.entries(chosen).map(([key, file]) => {
 });
 
 const source = fs.readFileSync(target, "utf8");
-if (source.includes("\n  sounds: {")) {
-  throw new Error("ai-data.js already carries a sounds block");
-}
-const anchor = /(\n  version: "[^"]*",\n)/;
-if (!anchor.test(source)) throw new Error("could not find the version line in ai-data.js");
 
 const block = `\n  // Bundled sound effects (Kenney, CC0 1.0). Inlined so playback is\n`
   + `  // instant and works offline.\n  sounds: {\n${lines.join("\n")}\n  },\n`;
 
-fs.writeFileSync(target, source.replace(anchor, `$1${block}`));
+// 已经有 sounds 块就整体替换（脚本要能反复跑），否则插在 version 行之后。
+const existing = /\n  \/\/ Bundled sound effects[\s\S]*?\n  sounds: \{[\s\S]*?\n  \},\n/;
+let updated;
+if (existing.test(source)) {
+  updated = source.replace(existing, block);
+} else {
+  const anchor = /(\n  version: "[^"]*",\n)/;
+  if (!anchor.test(source)) throw new Error("could not find the version line in ai-data.js");
+  updated = source.replace(anchor, `$1${block}`);
+}
+
+fs.writeFileSync(target, updated);
 console.log(`updated ${target}`);
