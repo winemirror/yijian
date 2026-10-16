@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.2.0-20261016";
+  const APP_ASSET_VERSION = "3.3.0-20261016";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -3813,6 +3813,21 @@
     elements.netLog.scrollTop = elements.netLog.scrollHeight;
   }
 
+  // 把底层错误码翻成人话。手机切后台再回来时信令 socket 常被系统掐掉，
+  // 旧版本只会抛一句 "server timeout: room.joined"，看不出发生了什么。
+  function netErrorText(message) {
+    const text = defaultTo(message, "unknown");
+    if (text.indexOf("signalling-not-ready") >= 0
+      || text.indexOf("signalling-closed") >= 0) {
+      return "信令连接已断开（页面切后台后常见），请重试";
+    }
+    if (text.indexOf("server timeout") >= 0) return "服务器无响应，请检查网络后重试";
+    if (text.indexOf("no_room") >= 0) return "房间不存在或已结束";
+    if (text.indexOf("room_full") >= 0) return "房间已满，可以改用「观战」";
+    if (text.indexOf("already_in_room") >= 0) return "已经在房间里了";
+    return text;
+  }
+
   function netSend(message) {
     if (!Net) return false;
     const sent = Net.send(message);
@@ -4286,7 +4301,7 @@
       await Net.joinByCode(code, { player: netPlayerName, want: state.net.want });
     } catch (error) {
       state.net.phase = "error";
-      netLog("加入房间失败：" + defaultTo(error && error.message, "unknown"));
+      netLog("加入房间失败：" + netErrorText(error && error.message));
       netRender();
     }
   }
@@ -4364,6 +4379,12 @@
       case "relay":
         netLog("已获得中继候选（TURN 中继可用）");
         break;
+      case "signalling-down":
+        netLog("信令连接已断开");
+        break;
+      case "signalling-retry":
+        netLog("信令连接已断开，正在重连后重试…");
+        break;
       case "connected":
         netLog(detail.kind === "spectator" ? "观众已连上" : "点对点通道已建立");
         break;
@@ -4407,7 +4428,7 @@
       }
     } catch (error) {
       state.net.phase = "error";
-      netLog("创建房间失败：" + defaultTo(error && error.message, "unknown"));
+      netLog("创建房间失败：" + netErrorText(error && error.message));
     }
     netRender();
   }
@@ -4431,7 +4452,7 @@
       await Net.joinRoom(room, { player: netPlayerName, want: state.net.want });
     } catch (error) {
       state.net.phase = "error";
-      netLog("加入房间失败：" + defaultTo(error && error.message, "unknown"));
+      netLog("加入房间失败：" + netErrorText(error && error.message));
       netRender();
     }
   }
@@ -4515,7 +4536,7 @@
     Net.onStatus((status) => {
       state.net.phase = status.phase;
       state.net.mode = status.mode;
-      if (status.phase === "error") netLog("通道错误：" + defaultTo(status.error, "unknown"));
+      if (status.phase === "error") netLog("通道错误：" + netErrorText(status.error));
       if (status.phase === "connected") {
         netLog("数据通道已建立");
         if (state.net.role === "guest" && !state.net.active) {
