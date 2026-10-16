@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.3.0-20261016";
+  const APP_ASSET_VERSION = "3.4.0-20261016";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2464,6 +2464,7 @@
     chatForm: document.getElementById("chatForm"),
     chatInput: document.getElementById("chatInput"),
     chatNote: document.getElementById("chatNote"),
+    chatNudge: document.getElementById("chatNudge"),
     netBadge: document.getElementById("netBadge"),
     netUnavailable: document.getElementById("netUnavailable"),
     netIdle: document.getElementById("netIdle"),
@@ -2476,9 +2477,12 @@
     netJoinCode: document.getElementById("netJoinCode"),
     netWatchCode: document.getElementById("netWatchCode"),
     netRoomName: document.getElementById("netRoomName"),
+    netPasswordField: document.getElementById("netPasswordField"),
+    netRoomPassword: document.getElementById("netRoomPassword"),
     netSide: document.getElementById("netSide"),
     netHost: document.getElementById("netHost"),
     netRooms: document.getElementById("netRooms"),
+    netRoomsTitle: document.getElementById("netRoomsTitle"),
     netSelfTest: document.getElementById("netSelfTest"),
     netRefresh: document.getElementById("netRefresh"),
     netManual: document.getElementById("netManual"),
@@ -4046,6 +4050,12 @@
         break;
       case "chat":
         appendChat(state.net.peerName || "对手", String(defaultTo(message.text, "")), false);
+        playSound("notify");
+        break;
+      case "nudge":
+        // 催促只在两名棋手之间传，观众看不到，也不该被催。
+        appendChat("系统", "对手催你快走棋", false);
+        playSound("notify");
         break;
       case "undoReq":
         // Only the opponent answers an undo request; a spectator just watches.
@@ -4098,34 +4108,46 @@
   function netRenderRooms(list) {
     if (!elements.netRooms) return;
     clearChildren(elements.netRooms);
-    if (!list || list.length === 0) {
+    lastRooms = Array.isArray(list) ? list : [];
+    if (lastRooms.length === 0) {
       const empty = document.createElement("div");
       empty.className = "empty-state";
-      empty.textContent = "暂时没有发现房间";
+      empty.textContent = state.net.mode === "server"
+        ? "当前没有公开房间"
+        : "暂时没有发现房间";
       elements.netRooms.appendChild(empty);
       return;
     }
-    list.forEach((room) => {
+    lastRooms.forEach((room) => {
       const row = document.createElement("div");
       row.className = "net-room";
       const name = document.createElement("span");
       name.className = "net-room-name";
-      name.textContent = room.name || "未命名房间";
+      name.textContent = (room.locked ? "[密码] " : "") + (room.name || "未命名房间");
       const meta = document.createElement("span");
       meta.className = "net-room-meta";
-      meta.textContent = defaultTo(room.addr && (room.addr.ip || room.addr.id), "本机");
+      if (room.server) {
+        meta.textContent = `房间码 ${room.id} · ${room.players || 0}/2 人`
+          + (room.spectators ? ` · 观众 ${room.spectators}` : "");
+      } else {
+        meta.textContent = defaultTo(room.addr && (room.addr.ip || room.addr.id), "本机");
+      }
       const actions = document.createElement("span");
       actions.className = "net-room-actions";
       const join = document.createElement("button");
       join.type = "button";
       join.className = "btn small";
       join.textContent = "加入";
-      join.addEventListener("click", () => netJoin(room, "play"));
+      join.addEventListener("click", () => (room.server
+        ? netJoinByCode("play", room.id)
+        : netJoin(room, "play")));
       const watch = document.createElement("button");
       watch.type = "button";
       watch.className = "btn small";
       watch.textContent = "观战";
-      watch.addEventListener("click", () => netJoin(room, "spectate"));
+      watch.addEventListener("click", () => (room.server
+        ? netJoinByCode("spectate", room.id)
+        : netJoin(room, "spectate")));
       actions.appendChild(join);
       actions.appendChild(watch);
       row.appendChild(name);
@@ -4185,19 +4207,23 @@
 
   async function netScan() {
     if (!Net || !state.net.available || state.net.inRoom) return;
-    // Server mode has no LAN room list - you join by room code.
-    if (state.net.mode === "server") return;
+    // 服务器模式列的是服务端的公开房间，局域网模式列的是广播发现的房间。
+    const browse = typeof Net.browse === "function" ? Net.browse : Net.scan;
     try {
-      const list = await Net.scan();
+      const list = await browse();
       netRenderRooms(list);
-      const key = list.map((room) => `${room.id}@${room.addr ? room.addr.ip : ""}`).join(",");
+      const key = list.map((room) => `${room.id}@${room.players || 0}`).join(",");
       if (key !== lastRoomKey) {
         lastRoomKey = key;
-        netLog(list.length
-          ? `发现 ${list.length} 个房间：${list
-            .map((room) => `${room.name || "未命名"}(${room.addr ? room.addr.ip : "?"})`)
-            .join("、")}`
-          : "暂未发现局域网房间");
+        if (!list.length) {
+          netLog(state.net.mode === "server" ? "当前没有公开房间" : "暂未发现局域网房间");
+        } else {
+          netLog(`发现 ${list.length} 个房间：` + list.map((room) => (
+            `${room.name || "未命名"}(${room.id}`
+            + (room.server ? ` ${room.players || 0}/2` : "")
+            + `)${room.locked ? " 需要密码" : ""}`
+          )).join("、"));
+        }
       }
     } catch (error) {
       netLog("搜索房间失败：" + defaultTo(error && error.message, "unknown"));
@@ -4205,10 +4231,23 @@
   }
 
   let lastRoomKey = "";
+  // 最近一次房间列表，用来判断点进去的房间是否需要密码。
+  let lastRooms = [];
 
   const NET_MODE_KEY = "xiangqi.net.mode";
   const NET_SERVER_KEY = "xiangqi.net.server";
   const DEFAULT_NET_SERVER = "wss://c.syjnb.top/ws";
+
+  // 两种模式显示的东西不一样；启动时和切换时都走这一份规则，免得两处不一致。
+  function netApplyModeVisibility(useServer) {
+    if (elements.netServerField) elements.netServerField.hidden = !useServer;
+    if (elements.netServerJoin) elements.netServerJoin.hidden = !useServer;
+    if (elements.netPasswordField) elements.netPasswordField.hidden = !useServer;
+    if (elements.netRoomsTitle) {
+      elements.netRoomsTitle.textContent = useServer ? "公开房间" : "局域网房间";
+    }
+    if (elements.netManual) elements.netManual.parentNode.hidden = useServer;
+  }
 
   function defaultNetMode() {
     const isBlogWeb = GLOBAL_SCOPE.location.protocol === "https:" && GLOBAL_SCOPE.location.hostname === "web.syjnb.top";
@@ -4248,9 +4287,7 @@
 
     if (elements.netServerField) elements.netServerField.hidden = !useServer;
     if (elements.netServerJoin) elements.netServerJoin.hidden = !useServer;
-    if (elements.netRefresh) elements.netRefresh.hidden = useServer;
-    if (elements.netRooms) elements.netRooms.hidden = useServer;
-    if (elements.netManual) elements.netManual.parentNode.hidden = useServer;
+    netApplyModeVisibility(useServer);
 
     if (useServer && !server) {
       netLog("请先填写服务器地址，再创建或加入房间");
@@ -4274,16 +4311,34 @@
   }
 
   // Server mode joins by room code instead of picking from a discovered list.
-  async function netJoinByCode(want) {
+  // 房间带密码时先问一次；服务器判定密码错了会再给一次机会。
+  function promptRoomPassword(hint) {
+    if (typeof window.prompt !== "function") return "";
+    const answer = window.prompt(hint || "该房间需要密码：", "");
+    return answer === null ? null : String(answer).trim();
+  }
+
+  async function netJoinByCode(want, codeOverride) {
     if (!Net || typeof Net.joinByCode !== "function") return;
     if (state.net.inRoom) return;
-    const code = defaultTo(elements.netRoomCode && elements.netRoomCode.value.trim(), "")
-      .toUpperCase();
+    const code = defaultTo(
+      codeOverride || (elements.netRoomCode && elements.netRoomCode.value),
+      ""
+    ).trim().toUpperCase();
     // The relay always hands out exactly six characters; anything else is a
     // typo and would just round-trip to a "房间不存在" from the server.
     if (code.length !== 6) {
       netLog("请输入 6 位房间码");
       return;
+    }
+    const known = lastRooms.find((room) => room.server && room.id === code);
+    let password = "";
+    if (known && known.locked) {
+      password = promptRoomPassword(`房间「${known.name || code}」需要密码：`);
+      if (password === null) {
+        netLog("已取消加入");
+        return;
+      }
     }
     const spectate = want === "spectate";
     state.net.inRoom = true;
@@ -4298,10 +4353,34 @@
     netLog(`正在通过服务器加入「${code}」…`);
     netRender();
     try {
-      await Net.joinByCode(code, { player: netPlayerName, want: state.net.want });
+      await Net.joinByCode(code, {
+        player: netPlayerName,
+        want: state.net.want,
+        password: password
+      });
     } catch (error) {
       state.net.phase = "error";
       netLog("加入房间失败：" + netErrorText(error && error.message));
+      netRender();
+      return;
+    }
+    // 密码错了：服务器会回 bad_password，这里再给一次输入机会。
+    const settled = typeof Net.status === "function" ? Net.status() : null;
+    if (settled && settled.phase === "error" && String(settled.error || "").indexOf("密码") >= 0) {
+      const retry = promptRoomPassword("密码不正确，再输一次：");
+      if (retry === null || retry === "") {
+        netLog("已取消加入");
+        return;
+      }
+      try {
+        await Net.joinByCode(code, {
+          player: netPlayerName,
+          want: state.net.want,
+          password: retry
+        });
+      } catch (error) {
+        netLog("加入房间失败：" + netErrorText(error && error.message));
+      }
       netRender();
     }
   }
@@ -4417,12 +4496,15 @@
     state.net.phase = "announcing";
     enterNetSetup();
     try {
+      const roomPassword = defaultTo(elements.netRoomPassword && elements.netRoomPassword.value, "").trim();
       const created = await Net.hostRoom({
         name: defaultTo(elements.netRoomName && elements.netRoomName.value.trim(), "") || "我的棋局",
-        player: netPlayerName
+        player: netPlayerName,
+        password: roomPassword
       });
       if (created && created.mode === "server" && created.room && created.room.id) {
-        netLog(`房间码 ${created.room.id} —— 发给对手即可加入`);
+        netLog(`房间码 ${created.room.id} —— 发给对手即可加入`
+          + (roomPassword ? "（已设密码）" : ""));
       } else {
         netLog(`正在广播房间，我方执${side === RED ? "红" : "黑"}`);
       }
@@ -4502,8 +4584,31 @@
     }, "play");
   }
 
+  // 聊天页的「催一下」：只发给对手，10 秒内最多一次，免得变成刷屏工具。
+  let lastNudgeAt = 0;
+
+  function netNudge() {
+    if (!netActive()) {
+      appendChat("系统", "联机对局才能催促对手", false);
+      return;
+    }
+    if (state.net.spectating) {
+      appendChat("系统", "观战不能催促", false);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastNudgeAt < 10000) {
+      appendChat("系统", "刚催过，稍等一下再催", false);
+      return;
+    }
+    lastNudgeAt = now;
+    netSend({ t: "nudge" });
+    appendChat("系统", "已催促对手走棋", false);
+  }
+
   function netWire() {
     if (elements.netHost) elements.netHost.addEventListener("click", netHost);
+    if (elements.chatNudge) elements.chatNudge.addEventListener("click", netNudge);
     if (elements.netSelfTest) {
       elements.netSelfTest.addEventListener("click", netRunSelfTest);
     }
@@ -4558,8 +4663,7 @@
     const serverMode = savedMode.mode === "server";
     if (elements.netServerField) elements.netServerField.hidden = !serverMode;
     if (elements.netServerJoin) elements.netServerJoin.hidden = !serverMode;
-    if (elements.netRefresh) elements.netRefresh.hidden = serverMode;
-    if (elements.netRooms) elements.netRooms.hidden = serverMode;
+    netApplyModeVisibility(serverMode);
     if (serverMode && savedMode.server && typeof Net.setServer === "function") {
       await Net.setServer(savedMode.server);
     }
@@ -4571,10 +4675,12 @@
     }
     if (state.net.available) {
       netScan();
+      // 服务器模式的房间列表要往服务端发请求，别刷得太勤。
+      const scanInterval = serverMode ? 8000 : 2500;
       window.setInterval(() => {
         if (state.net.inRoom) return;
         netScan();
-      }, 2500);
+      }, scanInterval);
       window.setInterval(() => {
         if (!netActive()) return;
         netSend({ t: "ping", at: Date.now() });

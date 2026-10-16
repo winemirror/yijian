@@ -1,76 +1,72 @@
-弈鉴 · 3.3 构建信息（2026-10-16）
+弈鉴 · 3.4 构建信息（2026-10-16）
 
 包名: com.yijian.xiangqi
-版本: 3.3 (versionCode 32)
+版本: 3.4 (versionCode 33)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.3.apk
+APK 文件: Yijian-Xiangqi-3.4.apk
+文件大小: 4362985 bytes
+SHA-256: 178DCA21F2B114E5BFA647809AE9AC95175B961836FE0404B4DB8951B624B96C
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 479232 bytes
+SHA-256: 80A88E72758D9EE76BF8C7352569DA22CF6EB686D42A31F4F352187E2A526198
+
+上一版: Yijian-Xiangqi-3.3.apk
 文件大小: 4360645 bytes
 SHA-256: 9712FC1CD56CFEE3B4CBF3451801DE65B316764BCD2FD8915E4B784C7DE6FD9E
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 473088 bytes
-SHA-256: 3FE0168D5047CE7C945EF35E37B6952B4CAE0FDDE4D91346FEEF60B605C9AEAC
+本次改动: 房间浏览器 + 房间密码 + 催促按钮 + 发言提醒音效接口
 
-上一版: Yijian-Xiangqi-3.2.apk
-文件大小: 4359061 bytes
-SHA-256: E296648A79D81257D82D85137668AD19521A2C76B46010B94132160431AB9944
+1) 房间浏览器（服务器模式）
+   服务端本来就有 room.list，但客户端在服务器模式把房间列表整个藏起来了，只能靠抄房间码。
+   现在：
+   - net.js 新增 browse()：服务器模式走 room.list（统一成 {id,name,players,spectators,locked,server}），
+     局域网模式退回广播扫描（带 addr），UI 只用 server 字段区分怎么加入。
+   - app.js 的 netScan 改用 browse()，两种模式共用同一个列表渲染：
+     服务器房间显示「房间码 XXXXXX · 1/2 人 · 观众 N」，点加入/观战直接按房间码连。
+   - 刷新按钮与列表在服务器模式不再隐藏；自动刷新间隔按模式区分（局域网 2.5s，服务器 8s，
+     免得往服务端狂发 room.list）。
 
-本次改动: 修复"手机加入房间时报 server timeout: room.joined"
+2) 房间密码
+   - 服务端：room.create 接受 password；只存哈希 sha256("<房间码>\n<密码>")（用房间码当盐，
+     不存明文）；room.join 校验不通过回 error code=bad_password；room.list 里带 locked 标记。
+     观众同样需要密码。
+   - 客户端：创建房间处新增「房间密码」输入（留空则公开）。加入时若房间带锁会弹出输入框；
+     服务器判定密码错误时会再给一次输入机会。错误文案走已有的人话翻译。
+   - 密码只在服务器模式生效（局域网房间是广播发现，没有密码概念）。
 
-现象（实测复现）：
-  手机用流量、电脑用宽带，电脑建房拿到房间码 FPATHY；手机点加入后
-  8 秒整报 `通道错误：Error: server timeout: room.joined`。
+3) 催促对方行棋
+   - 聊天面板快捷按钮新增「催一下」（带强调色）。
+   - 发的是独立消息类型 nudge，只在两名棋手之间传递（不进转发白名单，观众看不到也不会被催）。
+   - 客户端 10 秒内只允许催一次，重复点击会在聊天区提示；收到方显示「对手催你快走棋」并播放提醒音。
 
-定位：
-  服务端日志显示手机确实连上过（14:45:36），房间也建好了（14:45:43），
-  但**没有任何 room.join 记录**，而连接直到 14:46:26 才断——也就是说
-  客户端那条 room.join 根本没发出去，服务端当然不会回包。
-  根因在客户端：信令 socket 已经死了（iOS 把网页切到后台会掐掉 WebSocket，
-  更隐蔽的是"半开连接"：本地 readyState 还是 open，报文却石沉大海），
-  而 post() 发不出去时只是静默返回 false，调用方只能干等满 8 秒超时。
-
-客户端（fe/work/www/net.js + app.js）:
-  - waitFor 的等待项现在带 reject；socket 触发 onclose 时统一 failWaiters，
-    立刻以 signalling-closed 失败，不再干等超时。
-  - onclose 里清空 readyPromise / infoPromise / socket，使下一次 connect()
-    能真正重开一条连接（之前 readyPromise 永远指向死连接，重连永远不会发生）。
-  - 发送失败不再静默：postOrThrow() 在 room.create / room.list / room.join
-    发不出去时立刻抛 signalling-not-ready。
-  - joinSignalling 在真正 join 之前先发一条应用层 ping 并等 2.5 秒 pong，
-    专门用来戳穿"半开连接"。
-  - joinByCode 遇到上述传输层错误会自动重连并重试一次（用户无感）。
-  - 错误文案翻译成人话：signalling-closed/signalling-not-ready → "信令连接已断开
-    （页面切后台后常见），请重试"；server timeout → "服务器无响应，请检查网络后重试"；
-    另外补上 no_room / room_full / already_in_room 的中文提示。
-  - 房间日志新增两类事件：信令连接已断开、正在重连后重试…。
-
-服务端（fe/work/server/server.mjs）:
-  - sendError() 增加日志（error <code> -> <clientId>）。
-  - room.join 在处理前先记一行 room.join <CODE> <- <clientId>。
-    以前只有成功的 join 会写日志，出问题时从服务端看不出"客户端到底有没有发过来"。
+4) 发言提醒音效（接口就绪，素材待你选定）
+   - 收到对手聊天或催促时调用 playSound("notify")；音效开关沿用全局设置。
+   - 候选已生成，尚未内联：outputs/sfx/notify-1..5.mp3，
+     试听页 outputs/sfx/preview.html（新增「发言提醒」一节）。
+     来源 Kenney Interface Sounds（CC0），对应关系见 outputs/sfx/CREDITS.txt。
+   - 选定后我用 work/sfx/embed-sounds.mjs 把 notify 一并内联进 ai-data.js 即可，无需改代码逻辑。
 
 验证:
-  verify-net 新增两条回归，用假 WebSocket 精确复现两种断线：
-    - onclose 路径：79ms 失败并重连成功（旧实现要等满 8000ms）。
-    - 半开连接路径：ping 探测在 2565ms 发现并重连成功。
+  verify-server 新增 6 项：创建带密码房间、列表带 locked、不给密码被拒、密码错误被拒、
+    密码正确可加入、未设密码的房间 locked=false。
+  verify-net 新增 4 项（走真实信令服务端）：带密码建房、browse() 能列出并标记上锁、
+    不带密码加入被拒、带正确密码加入成功。
   六个套件全绿；perft(4) = 3290240。
-  线上冒烟：两个客户端对 c.syjnb.top 建房 + 加入，双向 room.joined / peer.join 正常。
+  额外静态检查：app.js 引用的 78 个元素 id 在 index.html 中全部存在。
 
 部署状态：已上线（2026-10-16）
-  - 信令服务 /opt/yijian/server.mjs 已更新并重启，
-    sha256 aa740f9840ca59163585e6fbce692a1df6e0e18c416510a30119057712116593（与仓库一致）。
-  - 网页端 /var/www/web.syjnb.top/yijian/ 已更新，
-    net.js sha256 7370268eb30818e3eb9e66db7f8849ae176b76f7c571da9b1c3c4da6c208645b（与仓库一致）。
-    静态资源带 ?v=3.3.0-20261016，绕开 nginx 的 7 天 immutable 缓存。
-  - https://c.syjnb.top/health → {"ok":true,"proto":1,"ice":2,"stun":1,"turn":2}
-  - yijian-signal 与 coturn 均为 active。
+  - /opt/yijian/server.mjs 已更新并重启。
+  - /var/www/web.syjnb.top/yijian/ 已更新（静态资源版本 3.4.0-20261016）。
+  - 线上冒烟：带密码建房 → room.list 显示 locked → 无密码被拒(bad_password)
+    → 带密码加入成功。https://c.syjnb.top/health 返回 {"ice":2,"stun":1,"turn":2}。
 
-已知限制（3.3）:
-  - 半开连接靠 ping 探测，代价是每次加入房间前多一个来回（约 2.5 秒上限，
-    正常网络下几十毫秒）。真·完全断网时仍会给出"服务器无响应"。
-  - TURN 中继带宽仍是那台 VPS 的带宽，两端都在 CGNAT 后面时全程走中继。
+已知限制（3.4）:
+  - 房间密码只挡"误入"，服务端不做失败次数限制；房间码 + 密码都在内存里，服务重启即失效。
+  - 房间浏览器只列公开房间（private 房间不进列表，仍可用房间码加入）。
+  - 发言提醒音效尚未选定，当前收到消息不会发声。
 
-说明: 基于 3.2 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.3 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。

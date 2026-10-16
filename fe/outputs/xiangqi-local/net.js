@@ -303,7 +303,12 @@
       },
       announce: function (room) {
         return connect().then(function () {
-          postOrThrow({ t: "room.create", name: room && room.name, visibility: "public" });
+          postOrThrow({
+            t: "room.create",
+            name: room && room.name,
+            visibility: "public",
+            password: (room && room.password) || ""
+          });
           return waitFor("room.joined");
         }).then(function (message) {
           expect(message);
@@ -322,7 +327,7 @@
         });
       },
       // Server mode only: join by room code and learn which peer is the hub.
-      joinSignalling: function (code, want) {
+      joinSignalling: function (code, want, password) {
         return connect().then(function () {
           // 先探一次半开连接：手机切后台后 NAT 映射可能已经失效，本地 socket
           // 还显示 open，发出去的报文却石沉大海。ping 不通就往上抛，让上层重连。
@@ -332,7 +337,8 @@
           postOrThrow({
             t: "room.join",
             roomId: String(code || "").toUpperCase(),
-            want: want === "spectate" ? "spectate" : "play"
+            want: want === "spectate" ? "spectate" : "play",
+            password: password || ""
           });
           return waitFor("room.joined");
         }).then(function (message) {
@@ -1002,6 +1008,45 @@
       });
     },
 
+    // 房间浏览器：服务器模式列出公开房间（room.list），局域网模式退回广播扫描。
+    // 两种来源统一成同一形状，UI 只按 server 字段区分怎么加入。
+    browse: function () {
+      return api.ready().then(function () {
+        if (!state.transport) return [];
+        if (state.transport.push) {
+          return Promise.resolve(state.transport.rooms())
+            .then(function (list) {
+              return (list || []).map(function (room) {
+                return {
+                  id: String(room.id || ""),
+                  name: room.name || "",
+                  players: Number(room.players || 0),
+                  spectators: Number(room.spectators || 0),
+                  locked: !!room.locked,
+                  private: !!room.private,
+                  server: true
+                };
+              });
+            })
+            .catch(function () { return []; });
+        }
+        return api.scan().then(function (list) {
+          return list.map(function (room) {
+            return {
+              id: room.id,
+              name: room.name,
+              players: 0,
+              spectators: 0,
+              locked: false,
+              private: false,
+              server: false,
+              addr: room.addr
+            };
+          });
+        });
+      });
+    },
+
     hostRoom: function (options) {
       // A double tap used to send two room.create frames: the server created
       // one room and rejected the second with already_in_room, which then
@@ -1011,7 +1056,8 @@
       var room = {
         id: options.id || randomId(),
         name: options.name || "YiJian",
-        role: "host"
+        role: "host",
+        password: options.password || ""
       };
       hostingPromise = api.ready().then(function () {
         if (!state.transport) {
@@ -1111,8 +1157,9 @@
     // like the LAN path does.
     joinByCode: function (code, options) {
       var want = options && options.want;
+      var password = (options && options.password) || "";
       function joinOnce() {
-        return state.transport.joinSignalling(code, want);
+        return state.transport.joinSignalling(code, want, password);
       }
       // 手机切到后台再回来时，信令 socket 常常已经被系统掐掉，第一次必然失败。
       // 这类错误重连一次就能好，不该让用户重新点一遍。

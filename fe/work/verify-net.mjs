@@ -583,6 +583,50 @@ try {
   check("并发建房回归完成", false, String(error && error.stack || error));
 }
 
+console.log("== net.js + server: 房间密码与房间浏览器 ==");
+try {
+  const { listen, close } = await import("./server/server.mjs");
+  const port = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "stun:stun.example.test:3478",
+    turnUrl: "",
+    turnSecret: "",
+  });
+  const url = `ws://127.0.0.1:${port}/ws`;
+
+  const webRTC = makeFakeWebRTC();
+  const host = loadNet(webRTC, "pw-host", { WebSocket });
+  const guest = loadNet(webRTC, "pw-guest", { WebSocket });
+  await host.setServer(url);
+  await guest.setServer(url);
+
+  const created = await host.hostRoom({ name: "密码房", password: "s3cret" });
+  const code = created.room && created.room.id;
+  check("带密码建房成功", !!code && /^[2-9A-HJ-NP-Z]{6}$/.test(code), String(code));
+
+  const listed = await guest.browse();
+  const entry = listed.find((room) => room.id === code);
+  check("房间浏览器能看到房间并标记上锁",
+    !!entry && entry.locked === true && entry.players === 1, JSON.stringify(entry));
+
+  const denied = await guest.joinByCode(code, { want: "play" });
+  check("不带密码加入会被拒绝",
+    denied.phase === "error" && String(denied.error || "").indexOf("密码") >= 0,
+    JSON.stringify({ phase: denied.phase, error: denied.error }));
+
+  const joined = await guest.joinByCode(code, { want: "play", password: "s3cret" });
+  check("带正确密码加入成功",
+    !!joined.room && joined.room.id === code && joined.phase !== "error",
+    JSON.stringify({ phase: joined.phase, room: joined.room }));
+
+  host.leave();
+  guest.leave();
+  await close();
+} catch (error) {
+  check("房间密码用例完成", false, String(error && error.stack || error));
+}
+
 console.log("== net.js: TURN 中继探测 ==");
 try {
   // 没配置 TURN：应立刻给出 no-turn-configured，而不是白等超时。
