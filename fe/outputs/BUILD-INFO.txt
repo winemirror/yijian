@@ -1,43 +1,43 @@
-弈鉴 · 3.13 构建信息（2026-10-18）
+弈鉴 · 3.14 构建信息（2026-10-18）
 
 包名: com.yijian.xiangqi
-版本: 3.13 (versionCode 42)
+版本: 3.14 (versionCode 43)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.13.apk
-文件大小: 4377877 bytes
-SHA-256: 9EFF0515A4316B7B233C0438F919029795C05F66665B568975AF610A009D640E
+APK 文件: Yijian-Xiangqi-3.14.apk
+文件大小: 4378021 bytes
+SHA-256: DFD2FAEBA39FE244C6A220B6992EB37D3D54C9696D2D02D1614B356ACAB2B364
 
 桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
 文件大小: 517632 bytes
-SHA-256: 70949ABB4EC6BEDE9C4F7FCD7BD09027AB3C259FC0D476A0D6EA000B114E637F
+SHA-256: CC08917B51D397C66F40424E66AFE06A8D35D120793B08BD3E8A307E1F0BCBA6
 
-上一版: Yijian-Xiangqi-3.12.apk
-文件大小: 4376937 bytes
-SHA-256: 52746A47102D2099127EC9E38B710F076DF66A26DB4D1FC1BF02B7491F21CA05
+上一版: Yijian-Xiangqi-3.13.apk
+文件大小: 4377877 bytes
+SHA-256: 9EFF0515A4316B7B233C0438F919029795C05F66665B568975AF610A009D640E
 
-本次改动: 计时器下方新增可滚动走法播报横幅
+本次改动: 限制走法播报栏宽度，超出时用滚动条
 
-- 布局：.game-status 里新增 #moveTicker（flex-basis: 100%，占满一整行），
-  位置在本局/本手计时器与回合数下面。
-- 内容：按当前复盘进度取 history[0..currentPly)，每条显示 record.notation
-  （例如「兵3进1」「馬2进3」），红方用深红、黑方用墨黑，最后一手加 .latest 高亮。
-- 滚动：容器 overflow-x: auto + scroll-behavior: smooth、支持触摸惯性、
-  细滚动条；有新着法时用 requestAnimationFrame 把 scrollLeft 设到 scrollWidth，
-  保证最后一手始终在最右侧。
-- 性能/体验：renderMoveTicker 用「ply + 最后一手的 from-to」做签名，
-  没有新着法就不重建，避免用户手动往回翻看时被拉回最右。
-- 空局面显示「走法播报」占位。
+原因:
+  .move-ticker 是 .game-status 的 flex 子项，默认 min-width:auto 意味着
+  它的最小宽度等于内容的 min-content 宽度。着法越多，这条横幅就越宽，
+  最终把 .game-status 甚至整页撑出屏幕。
+
+修复:
+  - .move-ticker 增加 min-width: 0 与 max-width: 100%（配合原有 width/flex-basis），
+    宽度被锁在容器内，内容只能横向滚动。
+  - 滚动条更明显：WebKit 高度 6px、滑块 22% 黑、带 4% 的轨道；
+    Firefox 继续用 scrollbar-width: thin。
 
 验证:
-  verify-motion 新增 4 项：标记存在、overflow-x:auto、两手按顺序、最后一手 latest。
-  六个套件全绿（含 verify-compat：没有使用 replaceChildren 等新 API）；perft(4)=3290240。
+  verify-motion 的 ticker 断言扩展为同时检查 overflow-x:auto、min-width:0、
+  max-width:100% 与 ::-webkit-scrollbar；六个套件全绿；perft(4)=3290240。
 
 部署状态：已上线（2026-10-18）
   - /var/www/web.syjnb.top/yijian/ 更新 app.js / index.html / styles.css
-    （资源版本 3.13.0-20261018）。
+    （资源版本 3.14.0-20261018）。
   - 服务端无改动。
 
-说明: 基于 3.12 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.13 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
