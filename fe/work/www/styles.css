@@ -737,6 +737,64 @@ select:focus {
   flex-wrap: wrap;
 }
 
+/* 走法播报：一行可横向滚动的横幅，最后一手始终在最右侧。 */
+.move-ticker {
+  flex: 0 0 100%;
+  width: 100%;
+  margin-top: 9px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  grid-gap: 9px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  scrollbar-width: thin;
+}
+
+.move-ticker::-webkit-scrollbar {
+  height: 4px;
+}
+
+.move-ticker::-webkit-scrollbar-thumb {
+  background: rgb(0 0 0 / 14%);
+  border-radius: 2px;
+}
+
+.move-ticker-item {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.move-ticker-item.red {
+  color: var(--red-dark);
+}
+
+.move-ticker-item.black {
+  color: var(--ink);
+}
+
+.move-ticker-item.latest {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f0ece2;
+  font-weight: 700;
+}
+
+.move-ticker-empty {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .clocks {
   display: flex;
   align-items: center;

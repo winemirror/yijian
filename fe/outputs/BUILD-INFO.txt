@@ -1,45 +1,43 @@
-弈鉴 · 3.12 构建信息（2026-10-18）
+弈鉴 · 3.13 构建信息（2026-10-18）
 
 包名: com.yijian.xiangqi
-版本: 3.12 (versionCode 41)
+版本: 3.13 (versionCode 42)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.12.apk
+APK 文件: Yijian-Xiangqi-3.13.apk
+文件大小: 4377877 bytes
+SHA-256: 9EFF0515A4316B7B233C0438F919029795C05F66665B568975AF610A009D640E
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 517632 bytes
+SHA-256: 70949ABB4EC6BEDE9C4F7FCD7BD09027AB3C259FC0D476A0D6EA000B114E637F
+
+上一版: Yijian-Xiangqi-3.12.apk
 文件大小: 4376937 bytes
 SHA-256: 52746A47102D2099127EC9E38B710F076DF66A26DB4D1FC1BF02B7491F21CA05
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 514560 bytes
-SHA-256: 2F8892F75586BD85670D18CCF3B67406E0636792E12A7D07BD3F42CF5A752D62
+本次改动: 计时器下方新增可滚动走法播报横幅
 
-上一版: Yijian-Xiangqi-3.11.apk
-文件大小: 4376725 bytes
-SHA-256: 2BB0537EF8789022AF57470BF03665A9814C0DA5D105FAD755E2A569E96E5BFC
-
-本次改动: 修复翻转棋盘后无法落子
-
-原因:
-  3.10 的翻转只改了「渲染」：棋子、落点、虚线都用 displayCol/displayRow 映射了；
-  但点击空格时的 pointToSquare() 仍然按未翻转的屏幕坐标换算棋盘索引。
-  于是翻转后点一个空格会落到镜像位置，state.legalMoves 找不到对应着法，
-  表现为"选中了棋子却走不出去"。
-
-修复:
-  pointToSquare() 在算出屏幕行列后，再用同一组映射换回棋盘坐标：
-    return displayRow(row) * 9 + displayCol(col);
-  180° 旋转是对合变换（再翻一次就回来），所以渲染和点击共用同一个映射。
+- 布局：.game-status 里新增 #moveTicker（flex-basis: 100%，占满一整行），
+  位置在本局/本手计时器与回合数下面。
+- 内容：按当前复盘进度取 history[0..currentPly)，每条显示 record.notation
+  （例如「兵3进1」「馬2进3」），红方用深红、黑方用墨黑，最后一手加 .latest 高亮。
+- 滚动：容器 overflow-x: auto + scroll-behavior: smooth、支持触摸惯性、
+  细滚动条；有新着法时用 requestAnimationFrame 把 scrollLeft 设到 scrollWidth，
+  保证最后一手始终在最右侧。
+- 性能/体验：renderMoveTicker 用「ply + 最后一手的 from-to」做签名，
+  没有新着法就不重建，避免用户手动往回翻看时被拉回最右。
+- 空局面显示「走法播报」占位。
 
 验证:
-  verify-motion 新增 3 项：
-    - 未翻转时 (650,650) 反解为 60；
-    - 翻转后同一屏幕点反解为 29；
-    - 0/4/60/85 四个棋子在翻转后的显示中心都能反解回原索引。
-  六个套件全绿；perft(4) = 3290240。
+  verify-motion 新增 4 项：标记存在、overflow-x:auto、两手按顺序、最后一手 latest。
+  六个套件全绿（含 verify-compat：没有使用 replaceChildren 等新 API）；perft(4)=3290240。
 
 部署状态：已上线（2026-10-18）
-  - /var/www/web.syjnb.top/yijian/ 更新 app.js / index.html（资源版本 3.12.0-20261018）。
+  - /var/www/web.syjnb.top/yijian/ 更新 app.js / index.html / styles.css
+    （资源版本 3.13.0-20261018）。
   - 服务端无改动。
 
-说明: 基于 3.11 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.12 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。

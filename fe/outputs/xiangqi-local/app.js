@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.12.0-20261018";
+  const APP_ASSET_VERSION = "3.13.0-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2441,6 +2441,7 @@
     turnBadge: document.getElementById("turnBadge"),
     statusText: document.getElementById("statusText"),
     moveCounter: document.getElementById("moveCounter"),
+    moveTicker: document.getElementById("moveTicker"),
     redWinValue: document.getElementById("redWinValue"),
     redWinBar: document.getElementById("redWinBar"),
     blackWinBar: document.getElementById("blackWinBar"),
@@ -2890,6 +2891,7 @@
     updateAutoStepButton();
     updatePlayButton();
     updateClocks();
+    renderMoveTicker();
     updateSoundButton();
   }
 
@@ -3153,6 +3155,49 @@
       `<line x1="${sx}" y1="${sy}" x2="${ex}" y2="${ey}"`
       + ` stroke="${color}" stroke-width="7" stroke-linecap="round"`
       + ` stroke-dasharray="16 13" opacity="0.9" />`;
+  }
+
+  // 走法播报：一行横向滚动，最新一手始终滚到最右侧。
+  let moveTickerSignature = "";
+
+  function renderMoveTicker() {
+    const ticker = elements.moveTicker;
+    if (!ticker) return;
+    const ply = currentPly();
+    const history = state.game.history.slice(0, ply);
+    const last = history[history.length - 1];
+    const signature = `${ply}|${last ? `${last.from}-${last.to}` : ""}`;
+    // 没有新着法就不重建，避免把用户手动翻看的位置拉回最右。
+    if (signature === moveTickerSignature) return;
+    moveTickerSignature = signature;
+
+    const items = [];
+    if (!history.length) {
+      const empty = document.createElement("span");
+      empty.className = "move-ticker-empty";
+      empty.textContent = "走法播报";
+      items.push(empty);
+    } else {
+      history.forEach((record, index) => {
+        const item = document.createElement("span");
+        item.className = `move-ticker-item ${record.side === RED ? "red" : "black"}`
+          + (index === history.length - 1 ? " latest" : "");
+        item.textContent = record.notation;
+        items.push(item);
+      });
+    }
+
+    clearChildren(ticker);
+    for (let index = 0; index < items.length; index += 1) {
+      ticker.appendChild(items[index]);
+    }
+    // 等布局完成再滚，保证 scrollWidth 是最新的。
+    const scrollToEnd = () => { ticker.scrollLeft = ticker.scrollWidth; };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(scrollToEnd);
+    } else {
+      scrollToEnd();
+    }
   }
 
   function renderCaptured() {
@@ -5487,6 +5532,7 @@
     renderPieces,
     pointToSquare,
     renderMoveLine,
+    renderMoveTicker,
     spawnMoveTrail,
     formatClock,
     updateClocks,
