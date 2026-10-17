@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.10.0-20261018";
+  const APP_ASSET_VERSION = "3.11.0-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -4088,6 +4088,10 @@
   }
 
   function debugEngine() {
+    if (netActive()) {
+      sysLine("多人对局中禁用 /engine（避免用引擎分析当前局面）");
+      return;
+    }
     const board = cloneBoard(state.game.board);
     const side = state.game.sideToMove;
     const counts = countMaterial(board);
@@ -4342,6 +4346,8 @@
   const CHAT_COMMANDS = {
     acesyj: {
       group: "金手指",
+      // 不在 /help 里列出；命令本身仍然有效。
+      hidden: true,
       run: netToggleCheat,
       help: "/acesyj 开启或关闭「自动下一步」（联机，仅本局）"
     },
