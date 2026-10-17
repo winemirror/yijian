@@ -87,6 +87,64 @@ const line = () => engine.__document.getElementById("moveLine").innerHTML;
     line().includes('stroke="#1f1d1a"'), line());
 }
 
+console.log("== board flip ==");
+{
+  check("topbar has a flip button", html.includes('id="flipBoard"'));
+  check("flipped layout swaps the player strips",
+    /\.game-column\.flipped \.player-strip\.red\s*\{[^}]*order:\s*1/.test(css)
+    && /\.game-column\.flipped \.player-strip\.black\s*\{[^}]*order:\s*3/.test(css));
+
+  engine.reset();
+  engine.state.flipped = false;
+  engine.renderPieces();
+  // renderPieces 先塞进 DocumentFragment 再 append；测试里把它摊平。
+  const flatPieces = () => {
+    const root = engine.__document.getElementById("pieces");
+    const out = [];
+    const walk = (nodes) => (nodes || []).forEach((node) => {
+      if (node.dataset && node.dataset.square) out.push(node);
+      else if (node.children) walk(node.children);
+    });
+    walk(root.children);
+    return out;
+  };
+  // 桩 DOM 的 clearChildren 不会真的清空，取最后一批节点。
+  const findPiece = (square) => flatPieces()
+    .filter((node) => node.dataset.square === square)
+    .pop();
+  const normal = findPiece("60");
+  check("默认红方在下：60 显示在第 6 列第 6 行",
+    !!normal && normal.style.props["--x"] === "6" && normal.style.props["--y"] === "6",
+    JSON.stringify(normal && normal.style.props));
+
+  engine.state.flipped = true;
+  engine.renderPieces();
+  const flipped = findPiece("60");
+  check("翻转后棋子坐标取反",
+    !!flipped && flipped.style.props["--x"] === "2" && flipped.style.props["--y"] === "3",
+    JSON.stringify(flipped && flipped.style.props));
+
+  engine.state.game.play(60, 51);
+  engine.renderMoveLine();
+  const flippedLine = line();
+  console.log(`  flipped line: ${flippedLine}`);
+  check("翻转后虚线坐标同步",
+    flippedLine.includes('x1="250.0"') && flippedLine.includes('y1="350.0"')
+    && flippedLine.includes('x2="250.0"') && flippedLine.includes('y2="450.0"'),
+    flippedLine);
+
+  engine.state.flipped = false;
+  engine.toggleBoardFlip();
+  check("翻转按钮切换状态", engine.state.flipped === true);
+  check("翻转状态写入 localStorage",
+    engine.__window.localStorage.getItem("xiangqi.board.flipped") === "1",
+    String(engine.__window.localStorage.getItem("xiangqi.board.flipped")));
+  engine.toggleBoardFlip();
+  check("再次翻转恢复并写入 0",
+    engine.state.flipped === false
+      && engine.__window.localStorage.getItem("xiangqi.board.flipped") === "0");
+}
+
 console.log("== move trail ==");
 {
   const pieces = engine.__document.getElementById("pieces");

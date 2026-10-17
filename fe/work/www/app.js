@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.9.0-20261018";
+  const APP_ASSET_VERSION = "3.10.0-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2416,6 +2416,8 @@
 
   const elements = {
     board: document.getElementById("board"),
+    gameColumn: document.querySelector(".game-column"),
+    flipBoard: document.getElementById("flipBoard"),
     moveLine: document.getElementById("moveLine"),
     resultBanner: document.getElementById("resultBanner"),
     resultBannerText: document.getElementById("resultBannerText"),
@@ -2520,6 +2522,8 @@
     endedAt: 0,
     soundOn: true,
     debug: false,
+    // 棋盘翻转：true 时黑方在下（坐标 180° 旋转）。
+    flipped: false,
     session: 0,
     // LAN multiplayer. Inactive until a room is joined or hosted, so the
     // single-player paths below stay exactly as they were.
@@ -2874,6 +2878,7 @@
   }
 
   function render() {
+    renderBoardFlip();
     renderPieces();
     renderMoveLine();
     renderCaptured();
@@ -2919,10 +2924,11 @@
     const target = elements.pieces.querySelector(`.piece[data-square="${targetSquare}"]`);
     if (!target) return 0;
 
-    const sourceRow = Math.floor(sourceSquare / 9);
-    const sourceCol = sourceSquare % 9;
-    const targetRow = Math.floor(targetSquare / 9);
-    const targetCol = targetSquare % 9;
+    // 用显示坐标：翻转后偏移方向也要跟着反过来。
+    const sourceRow = displayRow(Math.floor(sourceSquare / 9));
+    const sourceCol = displayCol(sourceSquare % 9);
+    const targetRow = displayRow(Math.floor(targetSquare / 9));
+    const targetCol = displayCol(targetSquare % 9);
     const piecesRect = elements.pieces.getBoundingClientRect();
     const startX = (sourceCol - targetCol) * (piecesRect.width / 9);
     const startY = (sourceRow - targetRow) * (piecesRect.height / 10);
@@ -3010,6 +3016,54 @@
     elements.blackLabel.textContent = controlLabel(BLACK);
   }
 
+  // --- 棋盘翻转 ---
+  const FLIP_KEY = "xiangqi.board.flipped";
+
+  function loadFlipSetting() {
+    try {
+      const raw = window.localStorage.getItem(FLIP_KEY);
+      if (raw === "1") return true;
+      if (raw === "0") return false;
+    } catch (error) {
+      // 隐私模式下读不到，按未设置处理。
+    }
+    return null;
+  }
+
+  function saveFlipSetting(on) {
+    try {
+      window.localStorage.setItem(FLIP_KEY, on ? "1" : "0");
+    } catch (error) {
+      // 存不了不影响本次使用。
+    }
+  }
+
+  function displayCol(col) {
+    return state.flipped ? 8 - col : col;
+  }
+
+  function displayRow(row) {
+    return state.flipped ? 9 - row : row;
+  }
+
+  function renderBoardFlip() {
+    if (elements.gameColumn) {
+      elements.gameColumn.classList.toggle("flipped", state.flipped);
+    }
+    if (elements.flipBoard) {
+      elements.flipBoard.textContent = state.flipped ? "摆正" : "翻转";
+      elements.flipBoard.title = state.flipped ? "恢复红方在下" : "翻转棋盘（黑方在下）";
+      elements.flipBoard.setAttribute("aria-label", elements.flipBoard.title);
+    }
+  }
+
+  function toggleBoardFlip() {
+    state.flipped = !state.flipped;
+    saveFlipSetting(state.flipped);
+    render();
+    setStatus(state.flipped ? "棋盘已翻转（黑方在下）" : "棋盘已摆正（红方在下）");
+  }
+
   function renderPieces() {
     const board = currentBoard();
     const fragment = document.createDocumentFragment();
@@ -3024,8 +3078,8 @@
       button.type = "button";
       button.className = `piece ${piece.side}`;
       button.dataset.square = String(index);
-      button.style.setProperty("--x", String(col));
-      button.style.setProperty("--y", String(row));
+      button.style.setProperty("--x", String(displayCol(col)));
+      button.style.setProperty("--y", String(displayRow(row)));
       button.textContent = pieceName(piece);
       button.setAttribute("aria-label", `${piece.side === RED ? "红" : "黑"}${pieceName(piece)} ${fileOf(col)}${row + 1}`);
 
@@ -3057,8 +3111,8 @@
       const target = board[move.to];
       const hint = document.createElement("span");
       hint.className = `hint${target ? " capture" : ""}`;
-      hint.style.setProperty("--x", String(move.to % 9));
-      hint.style.setProperty("--y", String(Math.floor(move.to / 9)));
+      hint.style.setProperty("--x", String(displayCol(move.to % 9)));
+      hint.style.setProperty("--y", String(displayRow(Math.floor(move.to / 9))));
       hintFragment.appendChild(hint);
     }
       clearChildren(elements.moveHints);
@@ -3084,10 +3138,10 @@
 
     const colors = state.pieceColors || DEFAULT_PIECE_COLORS;
     const color = record.side === RED ? colors.red : colors.black;
-    const x1 = 50 + (record.from % 9) * 100;
-    const y1 = 50 + Math.floor(record.from / 9) * 100;
-    const x2 = 50 + (record.to % 9) * 100;
-    const y2 = 50 + Math.floor(record.to / 9) * 100;
+    const x1 = 50 + displayCol(record.from % 9) * 100;
+    const y1 = 50 + displayRow(Math.floor(record.from / 9)) * 100;
+    const x2 = 50 + displayCol(record.to % 9) * 100;
+    const y2 = 50 + displayRow(Math.floor(record.to / 9)) * 100;
     // Centre to centre: the pieces layer paints above this SVG, so the two ends
     // are covered by the discs rather than the line being shortened.
     const sx = x1.toFixed(1);
@@ -3716,6 +3770,7 @@
   elements.newGame.addEventListener("click", resetGame);
   elements.undoMove.addEventListener("click", undo);
   elements.autoStep.addEventListener("click", playAutoStep);
+  if (elements.flipBoard) elements.flipBoard.addEventListener("click", toggleBoardFlip);
   elements.playToggle.addEventListener("click", togglePlay);
   elements.soundToggle.addEventListener("click", toggleSound);
   elements.autoSpeed.addEventListener("change", () => {
@@ -4482,6 +4537,10 @@
     state.net.phase = "connected";
     state.net.pendingUndo = false;
     enterNetSetup();
+    // 联机分到黑方时默认翻转，让己方在下方；用户手动设过就尊重设置。
+    if (loadFlipSetting() === null && mySide) {
+      state.flipped = mySide === BLACK;
+    }
     // Both sides start from a clean board, so the two copies line up.
     resetGame({ remote: true });
     // Spectators that arrived before the opponent need the fresh board too.
@@ -5415,6 +5474,8 @@
     levelFor,
     applyPieceColors,
     DEFAULT_PIECE_COLORS,
+    toggleBoardFlip,
+    renderPieces,
     renderMoveLine,
     spawnMoveTrail,
     formatClock,
@@ -5631,6 +5692,7 @@
   readSetupFromControls();
   applyPieceColors(loadPieceColors());
   state.soundOn = loadSoundSetting();
+  state.flipped = loadFlipSetting() === true;
   resetGame();
   netInit();
   // Keep the clocks live. `setInterval` is optional so a headless harness that

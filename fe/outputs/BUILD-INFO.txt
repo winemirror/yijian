@@ -1,66 +1,46 @@
-弈鉴 · 3.9 构建信息（2026-10-18）
+弈鉴 · 3.10 构建信息（2026-10-18）
 
 包名: com.yijian.xiangqi
-版本: 3.9 (versionCode 38)
+版本: 3.10 (versionCode 39)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.9.apk
+APK 文件: Yijian-Xiangqi-3.10.apk
+文件大小: 4376633 bytes
+SHA-256: C02532BD09D79F837DDC74F433548FB08B2FC096F3626AF94DD3ED97A762B7BB
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 514048 bytes
+SHA-256: AAFFF57E066DBDD9903C3978A187D840F2126F24815D8368963E70F3233D012A
+
+上一版: Yijian-Xiangqi-3.9.apk
 文件大小: 4375617 bytes
 SHA-256: 3AA9CDE7BD820E26BB24E302748415ACC54CC36C71B1035E0B56165189100BA2
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 511488 bytes
-SHA-256: 8F1D256BFD62E8998B041C3DB2A277AE75D223EEB7F5A858E3677DF94585AD29
+本次改动: 棋盘翻转
 
-上一版: Yijian-Xiangqi-3.8.apk
-文件大小: 4367553 bytes
-SHA-256: 2C907BF507F88E9363D33C31C486B5F7823A281FFD7F614427BDDBDD3E1FFCF8
+- 顶栏新增「翻转」按钮（翻转后变成「摆正」）。翻转 = 坐标 180° 旋转：
+  棋子、落点提示、上一手虚线、走子拖影全部跟着换向，点击/落子判定仍然按
+  棋盘索引走，不受影响。
+- 翻转时红/黑两条玩家信息条也会上下互换（CSS order），让"己方在下方"保持一致。
+- 状态存 localStorage["xiangqi.board.flipped"]（1/0），下次打开沿用。
+- 联机第一次分到黑方时自动翻转（让己方在下）；用户手动设置过就尊重设置。
 
-本次改动: 调试功能 P0 + P1 全量落地，/help 分组
-
-聊天框斜杠命令（全部本地执行，对手与观众都看不到）：
-  金手指
-    /acesyj               开启/关闭「自动下一步」（联机，仅本局）
-  网络
-    /net                  模式/阶段/服务器/ICE/候选类型/重连次数/本机地址
-    /net relay            切换强制中继（iceTransportPolicy=relay，下一次连接生效）
-    /diag                 导出诊断包 JSON（版本、UA、视口、网络、ICE 脱敏、
-                          候选统计、worker、房间日志、错误环、棋局摘要、引擎自检）
-  引擎
-    /engine               评估拆解 + 子力 + 搜索统计 + 前 5 候选
-    /perft [n]            perft 自检（默认 3，最大 4，对照 44/1920/79666/3290240）
-    /bench                开局/中局固定局面搜索基准（深度/节点/耗时/NPS）
-    /selftest             引擎自检（perft、帅走法、绝杀/困毙、将帅照面、开局库、分析探针）
-  对局
-    /fen <FEN>            按 FEN 摆局面（联机中拒绝，避免不同步）
-    /load <ICCS>          按标准 ICCS 导入着法，如 h2e2 h9g7（联机中拒绝）
-    /undo [n]             本地对局悔棋 n 手（联机中拒绝，走正常悔棋流程）
-    /dump                 导出当前棋谱 JSON（yijian.game v1）
-  诊断
-    /errors [/errors clear]  查看/清空 window.onerror 与 unhandledrejection 环缓冲
-    /ui                   视口/棋盘尺寸/棋子数/字体检查，并切换布局调试边框
-    /sound [/sound place] 音效清单与试听
-    /debug on|off         详细日志（控制台 + 房间日志）
-    /help                 分组列出全部命令
-
-实现要点:
-  - net.js 新增 diag() / setRelayOnly()，并统计候选类型、首个 relay 候选、信令重连次数。
-  - app.js 新增 CHAT_COMMANDS 注册表（group/help/run）与 runChatCommand()；
-    以后加命令只需登记一条。错误环缓冲 + downloadFile + FEN/ICCS 解析 +
-    棋谱导出（yijian.game v1）都在本地完成。
-  - ?selftest=1 的逻辑抽成 buildSelfTestReport()，供 URL 参数、/selftest、/diag 共用。
+实现:
+  - app.js：state.flipped + displayCol()/displayRow()；renderPieces / renderMoveLine /
+    animateMoveTransition 全部改用显示坐标；renderBoardFlip() 负责 class 与按钮文案；
+    toggleBoardFlip() 持久化并重绘。
+  - styles.css：.game-column.flipped 下用 order 把红色信息条移到上方、黑色移到下方。
 
 验证:
-  verify-net 新增 10 项：/fen 摆 32 子、/load 两手、/undo 撤销、/perft 输出 44、
-  /help 分组完整、/debug on/off、/sound 四个音效、诊断命令不抛异常；
-  另有一次性冒烟跑通 /engine /bench /selftest /diag。
+  verify-motion 新增 7 项：翻转按钮存在、信息条顺序、默认棋子坐标 (6,6)、
+  翻转后棋子坐标 (2,3)、翻转后虚线坐标、按钮切换、localStorage 持久化。
   六个套件全绿；perft(4) = 3290240。
 
 部署状态：已上线（2026-10-18）
-  - /var/www/web.syjnb.top/yijian/ 更新 app.js / net.js / index.html / styles.css
-    （资源版本 3.9.0-20261018）。
+  - /var/www/web.syjnb.top/yijian/ 更新 app.js / index.html / styles.css
+    （资源版本 3.10.0-20261018）。
   - 服务端无改动。
 
-说明: 基于 3.8 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.9 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
