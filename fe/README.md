@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| 当前版本 | 3.8（versionCode 37） |
+| 当前版本 | 3.9（versionCode 38） |
 | 运行形态 | 浏览器离线版 / Windows 便携 EXE / Android APK |
 | 前端 | 原生 JavaScript，零框架、零构建步骤 |
 | 服务端 | Node.js，零依赖（WebSocket 按 RFC 6455 手写） |
@@ -417,6 +417,25 @@ NNUE 引擎的主要差距。
   3.5 起已内联选定的 `notify-2`（Kenney Interface Sounds · glass_002）；
   想换的话改 `work/sfx/embed-sounds.mjs` 里的 `chosen.notify` 再跑一次即可，
   其余候选仍在 `outputs/sfx/notify-1..5.mp3`。
+
+### 4.11 调试命令
+
+聊天框里所有 `/` 开头的文本都只在本地执行，不会发给对手或观众；输入 `/help` 查看完整列表。
+
+| 命令 | 作用 |
+|---|---|
+| `/acesyj` | 开启/关闭「自动下一步」（联机，仅本局） |
+| `/net`、`/net relay` | 查看连接/ICE/候选；切换强制中继 |
+| `/diag` | 导出诊断包 JSON（网络、ICE 脱敏、日志、错误、棋局摘要、自检） |
+| `/engine` | 当前局面评估拆解 + 搜索统计 + 前 5 候选 |
+| `/perft [n]` | 走子生成自检（44 / 1920 / 79666 / 3290240） |
+| `/bench` | 开局/中局搜索基准 |
+| `/selftest` | 引擎自检（perft、绝杀/困毙、开局库、分析探针） |
+| `/fen <FEN>`、`/load <ICCS>`、`/undo [n]` | 摆局面、导入着法、本地悔棋 |
+| `/dump` | 导出当前棋谱 JSON（`yijian.game` v1） |
+| `/errors`、`/ui`、`/sound`、`/debug on\|off` | 错误记录、界面信息、音效试听、详细日志 |
+
+命令登记在 `CHAT_COMMANDS` 表里（`{ group, help, run }`），加新命令只需加一条；`/help` 会自动按分组列出。
 
 ---
 

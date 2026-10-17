@@ -243,6 +243,7 @@
             infoPromise = null;
           }
           failWaiters("signalling-closed");
+          reconnectCount += 1;
           emitDebug("signalling-down", {});
         };
         ws.onmessage = function (event) {
@@ -556,7 +557,9 @@
     // "auto" keeps the LAN chain; "server" uses the relay for signalling.
     prefer: "auto",
     serverUrl: "",
-    iceServers: []
+    iceServers: [],
+    // 调试：强制只走中继（TURN），用于验证 relay 候选。
+    relayOnly: false
   };
   var announceTimer = null;
   var pollTimer = null;
@@ -567,6 +570,10 @@
   var peers = Object.create(null);
   var localIceLogged = 0;
   var relayLogged = 0;
+  // 诊断计数：候选类型分布 / 首次中继候选 / 信令重连次数。
+  var candidateTypes = { host: 0, srflx: 0, prflx: 0, relay: 0 };
+  var relayCandidate = "";
+  var reconnectCount = 0;
   // Reused by hostRoom so a double tap cannot spawn two rooms.
   var hostingPromise = null;
 
@@ -762,12 +769,21 @@
   }
 
   function newPeerConnection(peer) {
-    var connection = new scope.RTCPeerConnection({
+    var config = {
       iceServers: state.iceServers.length ? state.iceServers : ICE_SERVERS
-    });
+    };
+    if (state.relayOnly) config.iceTransportPolicy = "relay";
+    var connection = new scope.RTCPeerConnection(config);
     connection.onicecandidate = function (event) {
       if (!event.candidate) return;
       var candidateText = String(event.candidate.candidate || "");
+      var typeMatch = / typ (host|srflx|prflx|relay)/.exec(candidateText);
+      if (typeMatch) {
+        candidateTypes[typeMatch[1]] += 1;
+        if (typeMatch[1] === "relay" && !relayCandidate) {
+          relayCandidate = candidateText.slice(0, 110);
+        }
+      }
       // A relayed candidate means the TURN allocation succeeded, i.e. the
       // credentials the server handed out actually work against coturn.
       if (!relayLogged && / typ relay/.test(candidateText)) {
@@ -991,6 +1007,42 @@
     },
 
     status: status,
+
+    // 调试用：脱敏后的连接诊断。TURN 凭证只报告"有没有"，绝不带出内容。
+    diag: function () {
+      var ice = [];
+      var list = state.iceServers || [];
+      for (var index = 0; index < list.length; index += 1) {
+        ice.push({
+          urls: list[index].urls,
+          hasCredential: !!(list[index].username && list[index].credential)
+        });
+      }
+      return {
+        mode: state.mode,
+        prefer: state.prefer,
+        phase: state.phase,
+        serverUrl: state.serverUrl,
+        turn: turnServers().length,
+        ice: ice,
+        candidates: {
+          host: candidateTypes.host,
+          srflx: candidateTypes.srflx,
+          prflx: candidateTypes.prflx,
+          relay: candidateTypes.relay
+        },
+        relay: relayCandidate,
+        reconnects: reconnectCount,
+        relayOnly: !!state.relayOnly,
+        localIps: state.localIps.slice(),
+        peers: peerCounts()
+      };
+    },
+
+    setRelayOnly: function (on) {
+      state.relayOnly = !!on;
+      return state.relayOnly;
+    },
 
     onStatus: function (cb) { listeners.status.push(cb); },
     onMessage: function (cb) { listeners.message.push(cb); },
