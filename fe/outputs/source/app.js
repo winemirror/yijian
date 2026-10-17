@@ -7,6 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
+  const APP_ASSET_VERSION = "3.16.0b3-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -102,6 +103,20 @@
       lmr: true
     }
   };
+  const PIKAFISH_LEVELS = {
+    "pikafish-fast": { label: "皮卡鱼 · 快速", moveMs: 500, analysisMs: 1200 },
+    "pikafish-standard": { label: "皮卡鱼 · 标准", moveMs: 1000, analysisMs: 1800 },
+    "pikafish-deep": { label: "皮卡鱼 · 深度", moveMs: 2200, analysisMs: 3200 }
+  };
+
+  function isPikafishLevel(levelKey) {
+    return Object.prototype.hasOwnProperty.call(PIKAFISH_LEVELS, levelKey);
+  }
+
+  function levelLabel(levelKey) {
+    if (isPikafishLevel(levelKey)) return PIKAFISH_LEVELS[levelKey].label;
+    return (AI_LEVELS[levelKey] || AI_LEVELS.medium).label;
+  }
   const ANALYSIS_LEVEL = {
     depth: 5,
     timeMs: 2800,
@@ -2051,9 +2066,18 @@
       ? analysis.moveScores
       : analysis.candidates;
     const best = allScores[0];
-    const chosen = allScores.find((candidate) => (
+    let chosen = allScores.find((candidate) => (
       candidate.move.from === record.from && candidate.move.to === record.to
     ));
+    if (
+      !chosen
+      && record.chosen
+      && record.chosen.move
+      && record.chosen.move.from === record.from
+      && record.chosen.move.to === record.to
+    ) {
+      chosen = record.chosen;
+    }
     if (!chosen) {
       return {
         score: 0,
@@ -2212,7 +2236,7 @@
     }
 
     createWorker() {
-      const worker = new Worker("ai-worker-bootstrap.js", { name: "xiangqi-ai" });
+      const worker = new Worker("ai-worker-bootstrap.js?v=" + APP_ASSET_VERSION, { name: "xiangqi-ai" });
       worker.onmessage = (event) => this.handleMessage(worker, event.data);
       worker.onerror = (event) => this.handleError(worker, event);
       worker.postMessage({ type: "warmup" });
@@ -2343,7 +2367,109 @@
     }
   }
 
-  async function analyzePositionScheduled(board, side, options) {
+  function gameUsesPikafish() {
+    return [RED, BLACK].some((side) => (
+      state.control[side] === "ai" && isPikafishLevel(levelFor(side))
+    ));
+  }
+
+  function pikafishLevelFor(side) {
+    const own = levelFor(side);
+    if (isPikafishLevel(own)) return own;
+    const red = levelFor(RED);
+    if (isPikafishLevel(red)) return red;
+    const black = levelFor(BLACK);
+    return isPikafishLevel(black) ? black : "pikafish-standard";
+  }
+
+  function pikafishScore(candidate) {
+    if (candidate && candidate.mate !== null && candidate.mate !== undefined) {
+      return candidate.mate > 0
+        ? MATE - Math.abs(candidate.mate) * 100
+        : -MATE + Math.abs(candidate.mate) * 100;
+    }
+    return Number(candidate && candidate.scoreCp || 0);
+  }
+
+  function pikafishWinRed(candidate, side, fallback) {
+    const wdl = candidate && candidate.wdl;
+    if (Array.isArray(wdl) && wdl.length === 3) {
+      const win = Number(wdl[0]) / 10;
+      const loss = Number(wdl[2]) / 10;
+      return clamp(side === RED ? win : loss, 0.5, 99.5);
+    }
+    return clamp(defaultTo(fallback, 50), 0.5, 99.5);
+  }
+
+  async function analyzeWithPikafish(board, side, options, historyMoves) {
+    if (!Pikafish) throw new Error("皮卡鱼客户端未加载");
+    const levelKey = pikafishLevelFor(side);
+    const response = await Pikafish.analyze(
+      historyMoves || [],
+      levelKey,
+      {
+        multiPv: defaultTo(options.candidates, 3),
+        timeMs: defaultTo(options.pikafishTimeMs, PIKAFISH_LEVELS[levelKey].analysisMs)
+      }
+    );
+
+    const ranked = [];
+    const rawCandidates = response.candidates || [];
+    for (let index = 0; index < rawCandidates.length; index += 1) {
+      const raw = rawCandidates[index];
+      const move = findUciMove(board, side, raw.pv && raw.pv[0]);
+      if (!move) continue;
+      const score = pikafishScore(raw);
+      ranked.push({
+        move,
+        score,
+        evalRed: side === RED ? score : -score,
+        winRed: pikafishWinRed(raw, side, scoreToRedWin(score, side)),
+        depth: raw.depth,
+        nodes: raw.nodes,
+        wdl: raw.wdl,
+        pv: raw.pv
+      });
+    }
+    if (ranked.length === 0) {
+      throw new Error("皮卡鱼没有返回合法候选着法");
+    }
+    ranked.sort((a, b) => b.score - a.score);
+    const best = ranked[0];
+    return {
+      side,
+      score: best.score,
+      evalRed: best.evalRed,
+      winRed: best.winRed,
+      bestMove: best.move,
+      bestNotation: moveToNotation(board, best.move),
+      candidates: ranked.slice(0, defaultTo(options.candidates, 5)),
+      moveScores: ranked,
+      nodes: Math.max(...ranked.map((item) => Number(item.nodes || 0))),
+      depth: Math.max(...ranked.map((item) => Number(item.depth || 0))),
+      elapsed: response.elapsedMs || 0,
+      terminal: false,
+      engine: "pikafish",
+      cloud: true
+    };
+  }
+
+  async function choosePikafishMove(game, levelKey) {
+    if (!Pikafish) throw new Error("皮卡鱼客户端未加载");
+    setStatus(`皮卡鱼思考中 · ${levelLabel(levelKey)}`);
+    const response = await Pikafish.chooseMove(historyToUci(game.history), levelKey);
+    const move = findUciMove(game.board, game.sideToMove, response.bestmove);
+    if (!move) throw new Error(`皮卡鱼返回非法着法：${response.bestmove || "-"}`);
+    document.documentElement.dataset.pikafishLast = response.bestmove;
+    document.documentElement.dataset.pikafishEngine =
+      response.engine || "pikafish";
+    return move;
+  }
+
+  async function analyzePositionScheduled(board, side, options, historyMoves) {
+    if (gameUsesPikafish()) {
+      return analyzeWithPikafish(board, side, options, historyMoves);
+    }
     const settings = {
       depth: defaultTo(options.depth, 4),
       timeMs: defaultTo(options.timeMs, 2800),
@@ -2379,6 +2505,9 @@
   }
 
   async function chooseAIMoveScheduled(game, levelKey) {
+    if (isPikafishLevel(levelKey)) {
+      return choosePikafishMove(game, levelKey);
+    }
     const level = AI_LEVELS[levelKey] || AI_LEVELS.medium;
     const bookMove = chooseOpeningBookMove(game, level, levelKey);
     if (bookMove) return bookMove;
@@ -2415,6 +2544,8 @@
 
   const elements = {
     board: document.getElementById("board"),
+    gameColumn: document.querySelector(".game-column"),
+    flipBoard: document.getElementById("flipBoard"),
     moveLine: document.getElementById("moveLine"),
     resultBanner: document.getElementById("resultBanner"),
     resultBannerText: document.getElementById("resultBannerText"),
@@ -2438,6 +2569,7 @@
     turnBadge: document.getElementById("turnBadge"),
     statusText: document.getElementById("statusText"),
     moveCounter: document.getElementById("moveCounter"),
+    moveTicker: document.getElementById("moveTicker"),
     redWinValue: document.getElementById("redWinValue"),
     redWinBar: document.getElementById("redWinBar"),
     blackWinBar: document.getElementById("blackWinBar"),
@@ -2463,6 +2595,7 @@
     chatForm: document.getElementById("chatForm"),
     chatInput: document.getElementById("chatInput"),
     chatNote: document.getElementById("chatNote"),
+    chatNudge: document.getElementById("chatNudge"),
     netBadge: document.getElementById("netBadge"),
     netUnavailable: document.getElementById("netUnavailable"),
     netIdle: document.getElementById("netIdle"),
@@ -2475,14 +2608,20 @@
     netJoinCode: document.getElementById("netJoinCode"),
     netWatchCode: document.getElementById("netWatchCode"),
     netRoomName: document.getElementById("netRoomName"),
+    netPasswordField: document.getElementById("netPasswordField"),
+    netRoomPassword: document.getElementById("netRoomPassword"),
     netSide: document.getElementById("netSide"),
     netHost: document.getElementById("netHost"),
     netRooms: document.getElementById("netRooms"),
+    netRoomsTitle: document.getElementById("netRoomsTitle"),
     netSelfTest: document.getElementById("netSelfTest"),
     netRefresh: document.getElementById("netRefresh"),
     netManual: document.getElementById("netManual"),
     netManualJoin: document.getElementById("netManualJoin"),
     netStatusText: document.getElementById("netStatusText"),
+    netCodeRow: document.getElementById("netCodeRow"),
+    netActiveCode: document.getElementById("netActiveCode"),
+    netCopyCode: document.getElementById("netCopyCode"),
     netDetail: document.getElementById("netDetail"),
     netResign: document.getElementById("netResign"),
     netNewGame: document.getElementById("netNewGame"),
@@ -2511,6 +2650,9 @@
     turnStartedAt: 0,
     endedAt: 0,
     soundOn: true,
+    debug: false,
+    // 棋盘翻转：true 时黑方在下（坐标 180° 旋转）。
+    flipped: false,
     session: 0,
     // LAN multiplayer. Inactive until a room is joined or hosted, so the
     // single-player paths below stay exactly as they were.
@@ -2529,7 +2671,11 @@
       mode: null,
       available: false,
       pendingUndo: false,
-      sentAt: 0
+      sentAt: 0,
+      // 当前房间码（服务端分配，固定不变；对局中也常驻显示）
+      roomCode: "",
+      // 金手指：聊天框输入斜杠命令开启，允许联机时用「自动下一步」，仅本局有效。
+      cheatAutoStep: false
     }
   };
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -2540,6 +2686,31 @@
   // harness, which disables the multiplayer entry points without touching any
   // of the single-player paths.
   const Net = (typeof window !== "undefined" && window.XiangqiNet) || null;
+  const Pikafish = (typeof window !== "undefined" && window.XiangqiPikafish) || null;
+
+  function moveToUci(move) {
+    const square = (index) => `${FILES[index % 9]}${9 - Math.floor(index / 9)}`;
+    return `${square(move.from)}${square(move.to)}`;
+  }
+
+  function historyToUci(history, length) {
+    const count = defaultTo(length, history.length);
+    const moves = [];
+    for (let index = 0; index < count && index < history.length; index += 1) {
+      moves.push(moveToUci(history[index]));
+    }
+    return moves;
+  }
+
+  function findUciMove(board, side, uci) {
+    const token = String(uci || "").toLowerCase();
+    if (!/^[a-i][0-9][a-i][0-9]$/.test(token)) return null;
+    const square = (name) => (9 - Number(name[1])) * 9 + FILES.indexOf(name[0]);
+    const from = square(token.slice(0, 2));
+    const to = square(token.slice(2, 4));
+    return generateLegalMoves(board, side)
+      .find((move) => move.from === from && move.to === to) || null;
+  }
 
   function netActive() {
     return !!(state.net && state.net.active);
@@ -2565,6 +2736,13 @@
     // "玩家" is what the two selects show while a net room is active.
     if (value === "player") return { control: "human", level: null };
     if (value === "human") return { control: "human", level: null };
+    if (typeof value === "string" && value.startsWith("pikafish:")) {
+      const level = `pikafish-${value.slice(9)}`;
+      return {
+        control: "ai",
+        level: isPikafishLevel(level) ? level : "pikafish-standard"
+      };
+    }
     if (typeof value === "string" && value.startsWith("ai:")) {
       const level = value.slice(3);
       return { control: "ai", level: AI_LEVELS[level] ? level : "medium" };
@@ -2573,7 +2751,9 @@
   }
 
   function setupValue(side) {
-    return state.control[side] === "human" ? "human" : `ai:${state.levels[side]}`;
+    if (state.control[side] === "human") return "human";
+    const level = state.levels[side];
+    return isPikafishLevel(level) ? `pikafish:${level.slice(9)}` : `ai:${level}`;
   }
 
   function applySetup(side, value) {
@@ -2622,7 +2802,7 @@
 
   function controlLabel(side) {
     if (netActive()) return side === state.net.mySide ? "你" : "对手";
-    return state.control[side] === "human" ? "你" : `AI · ${AI_LEVELS[levelFor(side)].label}`;
+    return state.control[side] === "human" ? "你" : levelLabel(levelFor(side));
   }
 
   function anyHumanControlled() {
@@ -2634,7 +2814,8 @@
     if (netActive()) {
       return `${color} · ${side === state.net.mySide ? "你" : "对手"}`;
     }
-    return state.control[side] === "human" ? `${color} · 你` : `${color} · AI`;
+    if (state.control[side] === "human") return `${color} · 你`;
+    return `${color} · ${isPikafishLevel(levelFor(side)) ? "皮卡鱼" : "本地 AI"}`;
   }
 
   // --- Piece colours ---------------------------------------------------------
@@ -2737,7 +2918,14 @@
     const now = Date.now();
     if (record) record.moveTimeMs = Math.max(0, now - (state.turnStartedAt || now));
     state.turnStartedAt = now;
-    if (state.game.result.type !== "ongoing") state.endedAt = now;
+    if (state.game.result.type !== "ongoing") {
+      state.endedAt = now;
+      // 金手指只对一局生效：本局一结束就收回去。
+      if (state.net.cheatAutoStep) {
+        state.net.cheatAutoStep = false;
+        if (state.net.inRoom) netLog("金手指已失效（本局结束）");
+      }
+    }
   }
 
   // --- Sound -----------------------------------------------------------------
@@ -2854,6 +3042,7 @@
   }
 
   function render() {
+    renderBoardFlip();
     renderPieces();
     renderMoveLine();
     renderCaptured();
@@ -2865,6 +3054,7 @@
     updateAutoStepButton();
     updatePlayButton();
     updateClocks();
+    renderMoveTicker();
     updateSoundButton();
   }
 
@@ -2899,10 +3089,11 @@
     const target = elements.pieces.querySelector(`.piece[data-square="${targetSquare}"]`);
     if (!target) return 0;
 
-    const sourceRow = Math.floor(sourceSquare / 9);
-    const sourceCol = sourceSquare % 9;
-    const targetRow = Math.floor(targetSquare / 9);
-    const targetCol = targetSquare % 9;
+    // 用显示坐标：翻转后偏移方向也要跟着反过来。
+    const sourceRow = displayRow(Math.floor(sourceSquare / 9));
+    const sourceCol = displayCol(sourceSquare % 9);
+    const targetRow = displayRow(Math.floor(targetSquare / 9));
+    const targetCol = displayCol(targetSquare % 9);
     const piecesRect = elements.pieces.getBoundingClientRect();
     const startX = (sourceCol - targetCol) * (piecesRect.width / 9);
     const startY = (sourceRow - targetRow) * (piecesRect.height / 10);
@@ -2988,6 +3179,57 @@
     }
     elements.redLabel.textContent = controlLabel(RED);
     elements.blackLabel.textContent = controlLabel(BLACK);
+    if (elements.chartHint) {
+      elements.chartHint.textContent = gameUsesPikafish() ? "皮卡鱼分析" : "每步更新";
+    }
+  }
+
+  // --- 棋盘翻转 ---
+  const FLIP_KEY = "xiangqi.board.flipped";
+
+  function loadFlipSetting() {
+    try {
+      const raw = window.localStorage.getItem(FLIP_KEY);
+      if (raw === "1") return true;
+      if (raw === "0") return false;
+    } catch (error) {
+      // 隐私模式下读不到，按未设置处理。
+    }
+    return null;
+  }
+
+  function saveFlipSetting(on) {
+    try {
+      window.localStorage.setItem(FLIP_KEY, on ? "1" : "0");
+    } catch (error) {
+      // 存不了不影响本次使用。
+    }
+  }
+
+  function displayCol(col) {
+    return state.flipped ? 8 - col : col;
+  }
+
+  function displayRow(row) {
+    return state.flipped ? 9 - row : row;
+  }
+
+  function renderBoardFlip() {
+    if (elements.gameColumn) {
+      elements.gameColumn.classList.toggle("flipped", state.flipped);
+    }
+    if (elements.flipBoard) {
+      elements.flipBoard.textContent = state.flipped ? "摆正" : "翻转";
+      elements.flipBoard.title = state.flipped ? "恢复红方在下" : "翻转棋盘（黑方在下）";
+      elements.flipBoard.setAttribute("aria-label", elements.flipBoard.title);
+    }
+  }
+
+  function toggleBoardFlip() {
+    state.flipped = !state.flipped;
+    saveFlipSetting(state.flipped);
+    render();
+    setStatus(state.flipped ? "棋盘已翻转（黑方在下）" : "棋盘已摆正（红方在下）");
   }
 
   function renderPieces() {
@@ -3004,8 +3246,8 @@
       button.type = "button";
       button.className = `piece ${piece.side}`;
       button.dataset.square = String(index);
-      button.style.setProperty("--x", String(col));
-      button.style.setProperty("--y", String(row));
+      button.style.setProperty("--x", String(displayCol(col)));
+      button.style.setProperty("--y", String(displayRow(row)));
       button.textContent = pieceName(piece);
       button.setAttribute("aria-label", `${piece.side === RED ? "红" : "黑"}${pieceName(piece)} ${fileOf(col)}${row + 1}`);
 
@@ -3037,8 +3279,8 @@
       const target = board[move.to];
       const hint = document.createElement("span");
       hint.className = `hint${target ? " capture" : ""}`;
-      hint.style.setProperty("--x", String(move.to % 9));
-      hint.style.setProperty("--y", String(Math.floor(move.to / 9)));
+      hint.style.setProperty("--x", String(displayCol(move.to % 9)));
+      hint.style.setProperty("--y", String(displayRow(Math.floor(move.to / 9))));
       hintFragment.appendChild(hint);
     }
       clearChildren(elements.moveHints);
@@ -3064,10 +3306,10 @@
 
     const colors = state.pieceColors || DEFAULT_PIECE_COLORS;
     const color = record.side === RED ? colors.red : colors.black;
-    const x1 = 50 + (record.from % 9) * 100;
-    const y1 = 50 + Math.floor(record.from / 9) * 100;
-    const x2 = 50 + (record.to % 9) * 100;
-    const y2 = 50 + Math.floor(record.to / 9) * 100;
+    const x1 = 50 + displayCol(record.from % 9) * 100;
+    const y1 = 50 + displayRow(Math.floor(record.from / 9)) * 100;
+    const x2 = 50 + displayCol(record.to % 9) * 100;
+    const y2 = 50 + displayRow(Math.floor(record.to / 9)) * 100;
     // Centre to centre: the pieces layer paints above this SVG, so the two ends
     // are covered by the discs rather than the line being shortened.
     const sx = x1.toFixed(1);
@@ -3079,6 +3321,49 @@
       `<line x1="${sx}" y1="${sy}" x2="${ex}" y2="${ey}"`
       + ` stroke="${color}" stroke-width="7" stroke-linecap="round"`
       + ` stroke-dasharray="16 13" opacity="0.9" />`;
+  }
+
+  // 走法播报：一行横向滚动，最新一手始终滚到最右侧。
+  let moveTickerSignature = "";
+
+  function renderMoveTicker() {
+    const ticker = elements.moveTicker;
+    if (!ticker) return;
+    const ply = currentPly();
+    const history = state.game.history.slice(0, ply);
+    const last = history[history.length - 1];
+    const signature = `${ply}|${last ? `${last.from}-${last.to}` : ""}`;
+    // 没有新着法就不重建，避免把用户手动翻看的位置拉回最右。
+    if (signature === moveTickerSignature) return;
+    moveTickerSignature = signature;
+
+    const items = [];
+    if (!history.length) {
+      const empty = document.createElement("span");
+      empty.className = "move-ticker-empty";
+      empty.textContent = "走法播报";
+      items.push(empty);
+    } else {
+      history.forEach((record, index) => {
+        const item = document.createElement("span");
+        item.className = `move-ticker-item ${record.side === RED ? "red" : "black"}`
+          + (index === history.length - 1 ? " latest" : "");
+        item.textContent = record.notation;
+        items.push(item);
+      });
+    }
+
+    clearChildren(ticker);
+    for (let index = 0; index < items.length; index += 1) {
+      ticker.appendChild(items[index]);
+    }
+    // 等布局完成再滚，保证 scrollWidth 是最新的。
+    const scrollToEnd = () => { ticker.scrollLeft = ticker.scrollWidth; };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(scrollToEnd);
+    } else {
+      scrollToEnd();
+    }
   }
 
   function renderCaptured() {
@@ -3373,28 +3658,48 @@
   }
 
   async function analyzeAndAttach(record, levels = {}) {
-    const beforeLevel = levels.before || ANALYSIS_LEVEL;
-    const afterLevel = levels.after || CURRENT_ANALYSIS_LEVEL;
-    const boardBefore = positionAtPly(state.game.history, record.index);
-    const analysis = await analyzePositionScheduled(
-      boardBefore,
-      record.side,
-      beforeLevel
-    );
-    record.analysis = analysis;
-    record.chosen = (analysis.moveScores || analysis.candidates).find((candidate) => (
-      candidate.move.from === record.from && candidate.move.to === record.to
-    )) || null;
+    try {
+      const beforeLevel = levels.before || ANALYSIS_LEVEL;
+      const afterLevel = levels.after || CURRENT_ANALYSIS_LEVEL;
+      const boardBefore = positionAtPly(state.game.history, record.index);
+      const beforeHistory = historyToUci(state.game.history, record.index);
+      const analysis = await analyzePositionScheduled(
+        boardBefore,
+        record.side,
+        beforeLevel,
+        beforeHistory
+      );
+      record.analysis = analysis;
+      const boardAfter = positionAtPly(state.game.history, record.index + 1);
+      const sideAfter = opposite(record.side);
+      const afterHistory = historyToUci(state.game.history, record.index + 1);
+      record.afterAnalysis = await analyzePositionScheduled(
+        boardAfter,
+        sideAfter,
+        afterLevel,
+        afterHistory
+      );
+      let chosen = (analysis.moveScores || analysis.candidates).find((candidate) => (
+        candidate.move.from === record.from && candidate.move.to === record.to
+      )) || null;
+      if (!chosen && record.afterAnalysis) {
+        chosen = {
+          move: { from: record.from, to: record.to },
+          score: record.afterAnalysis.score,
+          evalRed: record.afterAnalysis.evalRed,
+          winRed: record.afterAnalysis.winRed,
+          derivedFromAfter: true
+        };
+      }
+      record.chosen = chosen;
       record.winRedAfter = defaultTo(record.chosen && record.chosen.winRed, analysis.winRed);
       record.evalRedAfter = defaultTo(record.chosen && record.chosen.evalRed, analysis.evalRed);
-    record.quality = qualityForRecord(record, analysis);
-    const boardAfter = positionAtPly(state.game.history, record.index + 1);
-    const sideAfter = opposite(record.side);
-    record.afterAnalysis = await analyzePositionScheduled(
-      boardAfter,
-      sideAfter,
-      afterLevel
-    );
+      record.quality = qualityForRecord(record, analysis);
+    } catch (error) {
+      document.documentElement.dataset.pikafishError =
+        (error && error.message) || String(error);
+      setStatus(`皮卡鱼分析失败：${(error && error.message) || String(error)}`);
+    }
   }
 
   // Makes a single AI move for whichever side is on the move. Shared by normal
@@ -3411,7 +3716,18 @@
     if (options.pauseBefore) await wait(options.pauseBefore);
     if (session !== state.session) return;
 
-    const move = await chooseAIMoveScheduled(state.game, levelFor(side));
+    let move = null;
+    try {
+      move = await chooseAIMoveScheduled(state.game, levelFor(side));
+    } catch (error) {
+      state.busy = false;
+      document.documentElement.dataset.pikafishError =
+        (error && error.message) || String(error);
+      setStatus(`皮卡鱼不可用：${(error && error.message) || String(error)}`);
+      renderThinking();
+      render();
+      return null;
+    }
     if (session !== state.session) return;
     if (!move) {
       state.busy = false;
@@ -3450,13 +3766,13 @@
   }
 
   function updateAutoStepButton() {
+    const netGame = netActive();
+    const cheat = netGame && state.net.cheatAutoStep;
     const usable = state.live
       && !state.busy
       && state.game.result.type === "ongoing"
-      // Disabled in a net game: letting the engine pick your move would play
-      // the game for you.
-      && !netActive()
-      && canPlayNow();
+      // 联机默认禁用（让引擎替你走子等于代打）；只有金手指开启时放行。
+      && (cheat ? canMoveLocally() : (!netGame && canPlayNow()));
     elements.autoStep.disabled = !usable;
   }
 
@@ -3524,7 +3840,7 @@
   // is on the move, using that side's remembered AI strength.
   async function playAutoStep() {
     if (state.busy || !state.live || state.game.result.type !== "ongoing") return;
-    if (netActive()) {
+    if (netActive() && !state.net.cheatAutoStep) {
       setStatus("联机对局不使用自动下一步");
       return;
     }
@@ -3535,10 +3851,12 @@
       return;
     }
     allowAnimation = !prefersReducedMotion;
-    await playAIMoveOnce({
+    const record = await playAIMoveOnce({
       pauseBefore: 0,
       levels: { before: ANALYSIS_LEVEL, after: CURRENT_ANALYSIS_LEVEL }
     });
+    // 联机时这步算"我"走的，必须像手动走子一样同步给对手。
+    if (netActive() && record) netSendMove(record);
     await runAIDriver({ reply: true });
   }
 
@@ -3552,7 +3870,7 @@
     refreshAnimationFlag();
     renderThinking();
     render();
-    runAIDriver();
+    runAIDriver({ reply: state.control[state.game.sideToMove] === "ai" });
   }
 
   function wait(ms) {
@@ -3581,7 +3899,7 @@
     } else if (!netActive()) {
       appendChat("对手", "新对局开始，请多指教。", false);
     }
-    runAIDriver();
+    runAIDriver({ reply: state.control[state.game.sideToMove] === "ai" });
   }
 
   function undo(options = {}) {
@@ -3687,13 +4005,17 @@
     if (!inside(row, col)) return null;
     const distance = Math.hypot(x - (50 + col * 100), y - (50 + row * 100));
     if (distance > 46) return null;
-    return row * 9 + col;
+    // 翻转是 180° 对合变换（再翻一次就回来），所以同一个映射
+    // 也能把屏幕上的显示坐标换回棋盘索引。之前漏了这一步，
+    // 翻转后点空格会落到镜像位置，导致"选了棋子却走不出去"。
+    return displayRow(row) * 9 + displayCol(col);
   }
 
   elements.board.addEventListener("click", boardClick);
   elements.newGame.addEventListener("click", resetGame);
   elements.undoMove.addEventListener("click", undo);
   elements.autoStep.addEventListener("click", playAutoStep);
+  if (elements.flipBoard) elements.flipBoard.addEventListener("click", toggleBoardFlip);
   elements.playToggle.addEventListener("click", togglePlay);
   elements.soundToggle.addEventListener("click", toggleSound);
   elements.autoSpeed.addEventListener("change", () => {
@@ -3788,11 +4110,622 @@
     });
   });
 
+  // ------------------------------------------------------------ 聊天调试命令
+  // 全部只在本地执行，绝不会发给对手或观众。要加新的金手指/调试功能，
+  // 在 CHAT_COMMANDS 里登记一条 { group, help, run } 即可。
+  function sysLine(text) {
+    appendChat("系统", String(text), false);
+  }
+
+  function sysLines(lines) {
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index] !== undefined && lines[index] !== null) sysLine(lines[index]);
+    }
+  }
+
+  function debugLog(text) {
+    if (!state.debug) return;
+    netLog("[debug] " + text);
+    if (typeof console !== "undefined" && console.log) console.log("[yijian]", text);
+  }
+
+  // 错误环缓冲：window.onerror / unhandledrejection 都记下来，供 /errors 与 /diag。
+  const errorRing = [];
+  function recordError(kind, detail) {
+    const text = detail && (detail.stack || detail.message)
+      ? (detail.stack || detail.message)
+      : String(detail);
+    errorRing.push({
+      at: new Date().toISOString(),
+      kind: kind,
+      detail: String(text).slice(0, 800)
+    });
+    if (errorRing.length > 50) errorRing.shift();
+  }
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("error", (event) => recordError("error", event.error || event.message));
+    window.addEventListener("unhandledrejection", (event) => recordError("rejection", event.reason));
+  }
+
+  function timeSlug() {
+    return new Date().toISOString().replace(/[:.]/g, "-").replace("T", "-").slice(0, 19);
+  }
+
+  function downloadFile(filename, text, mime) {
+    try {
+      if (typeof Blob !== "function" || typeof URL === "undefined" || !URL.createObjectURL) {
+        sysLine("当前环境不支持下载文件");
+        return false;
+      }
+      const blob = new Blob([text], { type: mime || "application/json;charset=utf-8" });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = filename;
+      document.body.appendChild(link);
+      if (typeof link.click === "function") link.click();
+      setTimeout(() => {
+        try { document.body.removeChild(link); } catch (error) { /* gone */ }
+        URL.revokeObjectURL(href);
+      }, 0);
+      return true;
+    } catch (error) {
+      sysLine("下载失败：" + defaultTo(error && error.message, "unknown"));
+      return false;
+    }
+  }
+
+  function parseXiangqiFen(fen) {
+    const parts = String(fen || "").trim().split(/\s+/);
+    if (!parts[0]) throw new Error("缺少 FEN 局面");
+    const rows = parts[0].split("/");
+    if (rows.length !== 10) throw new Error("FEN 必须有 10 行");
+    const board = new Array(90).fill(null);
+    for (let row = 0; row < 10; row += 1) {
+      let col = 0;
+      for (const ch of rows[row]) {
+        if (/[1-9]/.test(ch)) {
+          col += Number(ch);
+          continue;
+        }
+        const type = ch.toLowerCase();
+        if (!PIECE_NAMES[type]) throw new Error("不认识的棋子：" + ch);
+        if (col > 8) throw new Error(`第 ${row + 1} 行超过 9 列`);
+        board[row * 9 + col] = { type, side: ch === ch.toUpperCase() ? RED : BLACK };
+        col += 1;
+      }
+      if (col !== 9) throw new Error(`第 ${row + 1} 行不是 9 列`);
+    }
+    const side = /^b$/i.test(parts[1] || "") ? BLACK : RED;
+    return { board, side };
+  }
+
+  function parseIccsMoves(text) {
+    const tokens = String(text || "").trim().split(/[\s,]+/).filter(Boolean);
+    return tokens.map((token) => {
+      const clean = token.replace(/-/g, "").toLowerCase();
+      // 标准 ICCS：a-i 为文件，0-9 为横线（0 = 红方底线）。
+      const match = /^([a-i])([0-9])([a-i])([0-9])$/.exec(clean);
+      if (!match) throw new Error("看不懂的着法：" + token);
+      return {
+        from: (9 - Number(match[2])) * 9 + FILES.indexOf(match[1]),
+        to: (9 - Number(match[4])) * 9 + FILES.indexOf(match[3])
+      };
+    });
+  }
+
+  function applyDebugGame(game, label) {
+    state.session += 1;
+    aiDriverToken += 1;
+    state.game = game;
+    state.selected = null;
+    state.legalMoves = [];
+    state.live = true;
+    state.reviewPly = game.history.length;
+    state.displayAnalysis = null;
+    state.busy = false;
+    state.playing = false;
+    state.startedAt = Date.now();
+    state.turnStartedAt = state.startedAt;
+    state.endedAt = 0;
+    renderThinking();
+    render();
+    updatePlayButton();
+    sysLine(label);
+  }
+
+  function materialUnits(counts) {
+    let sum = 0;
+    Object.keys(counts || {}).forEach((type) => {
+      if (type === "k") return;
+      sum += (counts[type] || 0) * (PIECE_VALUES[type] || 0);
+    });
+    return sum;
+  }
+
+  function debugNet(arg) {
+    if (!Net || typeof Net.diag !== "function") {
+      sysLine("当前环境没有联机层");
+      return;
+    }
+    const sub = String(arg || "").trim().toLowerCase();
+    if (sub === "relay") {
+      const now = !Net.diag().relayOnly;
+      Net.setRelayOnly(now);
+      sysLine(`强制中继已${now ? "开启" : "关闭"}（对下一次连接生效）`);
+    }
+    const net = Net.status ? Net.status() : {};
+    const diag = Net.diag();
+    const iceText = (diag.ice || []).map((entry) => (
+      Array.isArray(entry.urls) ? entry.urls.join(" + ") : String(entry.urls || "")
+    )).join("；");
+    const hasCredential = (diag.ice || []).some((entry) => entry.hasCredential);
+    sysLines([
+      `模式 ${net.mode || "-"} / 阶段 ${net.phase || "-"} / 方式 ${net.prefer || "-"}`,
+      `服务器 ${net.serverUrl || "-"}`,
+      `ICE ${iceText || "无"}（TURN ${diag.turn} 条${hasCredential ? "，带临时凭证" : ""}）`,
+      `候选 host ${diag.candidates.host} / srflx ${diag.candidates.srflx} / relay ${diag.candidates.relay}`,
+      `中继候选 ${diag.relay ? "已获得" : "无"}；重连 ${diag.reconnects} 次；强制中继 ${diag.relayOnly ? "开" : "关"}`,
+      `本机地址 ${(diag.localIps || []).join(" / ") || "-"}`
+    ]);
+  }
+
+  function compactGame() {
+    return {
+      result: Object.assign({}, state.game.result),
+      halfmoveClock: state.game.halfmoveClock,
+      sideToMove: state.game.sideToMove,
+      moves: state.game.history.map((record) => ({
+        i: record.index,
+        from: record.from,
+        to: record.to,
+        side: record.side,
+        notation: record.notation,
+        ms: record.moveTimeMs || 0,
+        quality: record.quality ? record.quality.label : "",
+        winRed: typeof record.winRedAfter === "number" ? record.winRedAfter : null
+      }))
+    };
+  }
+
+  function buildDiagnostics() {
+    const netStatus = Net && Net.status ? Net.status() : null;
+    const netDiag = Net && Net.diag ? Net.diag() : null;
+    return {
+      generatedAt: new Date().toISOString(),
+      app: {
+        assetVersion: APP_ASSET_VERSION,
+        url: (typeof location !== "undefined" ? location.href.split("?")[0] : ""),
+        ua: (typeof navigator !== "undefined" ? navigator.userAgent : ""),
+        dpr: (typeof window !== "undefined" ? window.devicePixelRatio : 0),
+        viewport: (typeof window !== "undefined"
+          ? { w: window.innerWidth, h: window.innerHeight }
+          : null),
+        reducedMotion: prefersReducedMotion
+      },
+      net: netStatus ? {
+        mode: netStatus.mode,
+        phase: netStatus.phase,
+        prefer: netStatus.prefer,
+        serverUrl: netStatus.serverUrl,
+        turn: netStatus.turn,
+        peers: netStatus.peers,
+        localIps: netStatus.localIps
+      } : null,
+      netDiag: netDiag,
+      workers: {
+        count: document.documentElement.dataset.workerCount || "0",
+        backend: document.documentElement.dataset.workerBackend || "",
+        error: document.documentElement.dataset.workerError || ""
+      },
+      roomLog: (elements.netLog ? elements.netLog.textContent : "").split("\n").slice(-200),
+      errors: errorRing.slice(),
+      game: compactGame(),
+      selftest: buildSelfTestReport()
+    };
+  }
+
+  function debugDiag() {
+    const bundle = buildDiagnostics();
+    const text = JSON.stringify(bundle, null, 2);
+    if (!downloadFile(`yijian-diag-${timeSlug()}.json`, text)) return;
+    sysLine(`诊断包已导出（${Math.max(1, Math.round(text.length / 1024))} KB）`);
+  }
+
+  function debugEngine() {
+    if (netActive()) {
+      sysLine("多人对局中禁用 /engine（避免用引擎分析当前局面）");
+      return;
+    }
+    const board = cloneBoard(state.game.board);
+    const side = state.game.sideToMove;
+    const counts = countMaterial(board);
+    const score = evaluateBoard(board, side);
+    const analysis = analyzePosition(board, side, {
+      depth: 4,
+      timeMs: 700,
+      nodeLimit: 120000,
+      candidates: 5,
+      nullMove: true,
+      pvs: true,
+      checkExtension: true,
+      lmr: true
+    });
+    const lines = [
+      `评估 ${score}（${side === RED ? "红" : "黑"}方视角）`,
+      `子力 红 ${materialUnits(counts[RED])} / 黑 ${materialUnits(counts[BLACK])}`,
+      `搜索 深度 ${analysis.depth}，节点 ${analysis.nodes}，${analysis.elapsed}ms`,
+      `首选 ${analysis.bestNotation || "-"}，评分 ${analysis.score}，红方赢面 ${analysis.winRed.toFixed(1)}%`
+    ];
+    (analysis.moveScores || []).slice(0, 5).forEach((entry, index) => {
+      lines.push(`${index + 1}. ${moveToNotation(board, entry.move)}  评分 ${entry.score}  赢面 ${entry.winRed.toFixed(1)}%`);
+    });
+    sysLines(lines);
+  }
+
+  function debugPerft(arg) {
+    const max = Math.max(1, Math.min(4, Number(arg) || 3));
+    const expected = [44, 1920, 79666, 3290240];
+    const lines = [];
+    for (let depth = 1; depth <= max; depth += 1) {
+      const started = performance.now();
+      const nodes = perft(cloneBoard(INITIAL_POSITION), RED, depth);
+      const ms = Math.max(1, performance.now() - started);
+      const ok = nodes === expected[depth - 1];
+      lines.push(`perft ${depth}: ${nodes}（期望 ${expected[depth - 1]}）${ok ? "OK" : "MISMATCH"} ${ms.toFixed(0)}ms ${Math.round(nodes / (ms / 1000))} nps`);
+    }
+    sysLines(lines);
+  }
+
+  function benchProbe(label, game, side) {
+    const analysis = analyzePosition(cloneBoard(game.board), side, {
+      depth: 4,
+      timeMs: 600,
+      nodeLimit: 150000,
+      candidates: 3,
+      nullMove: true,
+      pvs: true,
+      checkExtension: true,
+      lmr: true
+    });
+    const ms = Math.max(1, analysis.elapsed);
+    return `${label}: 深度 ${analysis.depth}，${analysis.nodes} 节点，${ms}ms，${Math.round(analysis.nodes / (ms / 1000))} nps，首选 ${analysis.bestNotation || "-"}`;
+  }
+
+  function debugBench() {
+    const lines = [];
+    lines.push(benchProbe("开局", new XiangqiGame(), RED));
+    const mid = new XiangqiGame();
+    [[60, 51], [1, 20], [70, 67], [25, 24], [67, 31]].forEach(([from, to]) => mid.play(from, to));
+    lines.push(benchProbe("中局", mid, BLACK));
+    sysLines(lines);
+  }
+
+  function debugSelfTest() {
+    const report = buildSelfTestReport();
+    sysLines([
+      `perft ${report.d1} / ${report.d2} / ${report.d3}`,
+      `帅的合法走法 ${report.kingMoves}；绝杀 ${report.mate.legalMoves} 手（被将 ${report.mate.inCheck}）`,
+      `困毙 ${report.stalemate.legalMoves} 手（被将 ${report.stalemate.inCheck}）`,
+      `将帅照面时车的走法 ${report.flyingGeneral.rookMoves}`,
+      `开局库 ${report.openingBook.positions} 个局面 / ${report.openingBook.lines} 条线路，高级首选 ${report.openingBook.masterFirstMove || "-"}`,
+      `分析探针 ${report.analysisProbe.best}，红方赢面 ${Number(report.analysisProbe.rate).toFixed(1)}%`
+    ]);
+  }
+
+  function debugFen(arg) {
+    if (netActive()) {
+      sysLine("联机中不能摆局面（会与对手不同步）");
+      return;
+    }
+    const fen = String(arg || "").trim();
+    if (!fen) {
+      sysLine("用法：/fen <FEN>，例如 rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1");
+      return;
+    }
+    try {
+      const parsed = parseXiangqiFen(fen);
+      const game = new XiangqiGame();
+      game.board = cloneBoard(parsed.board);
+      game.sideToMove = parsed.side;
+      game.history = [];
+      game.positionCounts = Object.create(null);
+      game.positionCounts[stateKey(parsed.board, parsed.side)] = 1;
+      game.halfmoveClock = 0;
+      game.result = { type: "ongoing", winner: null, reason: "" };
+      applyDebugGame(game, `已载入 FEN（${parsed.side === RED ? "红" : "黑"}方行棋）`);
+    } catch (error) {
+      sysLine("FEN 解析失败：" + defaultTo(error && error.message, "unknown"));
+    }
+  }
+
+  function debugLoad(arg) {
+    if (netActive()) {
+      sysLine("联机中不能载入着法（会与对手不同步）");
+      return;
+    }
+    const text = String(arg || "").trim();
+    if (!text) {
+      sysLine("用法：/load h2e2 h9g7 ...（ICCS 坐标，空格或逗号分隔）");
+      return;
+    }
+    try {
+      const moves = parseIccsMoves(text);
+      const game = new XiangqiGame();
+      for (let index = 0; index < moves.length; index += 1) {
+        try {
+          game.play(moves[index].from, moves[index].to);
+        } catch (error) {
+          throw new Error(`第 ${index + 1} 手不合法（${defaultTo(error && error.message, "unknown")}）`);
+        }
+      }
+      applyDebugGame(game, `已载入 ${moves.length} 手（${game.result.type === "ongoing" ? "未分胜负" : "已结束"}）`);
+    } catch (error) {
+      sysLine("载入失败：" + defaultTo(error && error.message, "unknown"));
+    }
+  }
+
+  function debugUndo(arg) {
+    if (netActive()) {
+      sysLine("联机中请用「悔棋」按钮走双方同意流程");
+      return;
+    }
+    const total = state.game.history.length;
+    if (!total) {
+      sysLine("还没有可悔的棋");
+      return;
+    }
+    const count = Math.max(1, Math.min(20, Number(arg) || 1));
+    state.game.undo(count);
+    state.reviewPly = state.game.history.length;
+    state.live = true;
+    state.selected = null;
+    state.legalMoves = [];
+    state.displayAnalysis = null;
+    render();
+    sysLine(`已悔棋 ${Math.min(count, total)} 手`);
+  }
+
+  function buildGameExport() {
+    const now = new Date().toISOString();
+    const nameOf = (side) => {
+      if (netActive()) {
+        return side === state.net.mySide ? netPlayerName : (state.net.peerName || "对手");
+      }
+      if (state.control[side] === "human") return "我";
+      const level = AI_LEVELS[state.levels[side]];
+      return "AI · " + (level ? level.label : state.levels[side]);
+    };
+    return {
+      format: "yijian.game",
+      version: 1,
+      id: "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      createdAt: new Date(state.startedAt || Date.now()).toISOString(),
+      endedAt: state.game.result.type === "ongoing" ? null : now,
+      mode: netActive() ? "online" : "local",
+      red: { name: nameOf(RED) },
+      black: { name: nameOf(BLACK) },
+      result: Object.assign({}, state.game.result),
+      moves: state.game.history.map((record) => ({
+        i: record.index,
+        from: record.from,
+        to: record.to,
+        side: record.side,
+        notation: record.notation,
+        ms: record.moveTimeMs || 0,
+        quality: record.quality ? record.quality.label : "",
+        winRed: typeof record.winRedAfter === "number" ? record.winRedAfter : null
+      })),
+      meta: { app: APP_ASSET_VERSION, engine: "yijian" }
+    };
+  }
+
+  function debugDump() {
+    const record = buildGameExport();
+    const text = JSON.stringify(record, null, 2);
+    if (!downloadFile(`yijian-game-${timeSlug()}.json`, text)) return;
+    sysLine(`棋谱已导出（${record.moves.length} 手）`);
+  }
+
+  function debugErrors(arg) {
+    if (String(arg || "").trim().toLowerCase() === "clear") {
+      errorRing.length = 0;
+      sysLine("错误记录已清空");
+      return;
+    }
+    if (!errorRing.length) {
+      sysLine("没有记录到错误");
+      return;
+    }
+    sysLines(errorRing.slice(-20).map((entry) => (
+      `[${entry.at.slice(11, 19)}] ${entry.kind}: ${entry.detail.slice(0, 160)}`
+    )));
+  }
+
+  function debugUi() {
+    const board = elements.board && typeof elements.board.getBoundingClientRect === "function"
+      ? elements.board.getBoundingClientRect()
+      : null;
+    const fontsReady = !!(document.fonts && typeof document.fonts.check === "function");
+    const fontOk = fontsReady ? document.fonts.check('16px "Xiangqi Li"') : false;
+    document.documentElement.classList.toggle("debug-ui");
+    const on = document.documentElement.classList.contains("debug-ui");
+    sysLines([
+      `视口 ${window.innerWidth}×${window.innerHeight} @${window.devicePixelRatio || 1}x`,
+      `棋盘 ${board ? Math.round(board.width) + "×" + Math.round(board.height) : "-"}，棋子 ${elements.pieces ? elements.pieces.children.length : 0} 个`,
+      `字体检查 ${fontsReady ? (fontOk ? "OK" : "未命中") : "不支持 document.fonts"}`,
+      `布局边框已${on ? "开启" : "关闭"}`
+    ]);
+  }
+
+  function debugSound(arg) {
+    const sources = (GLOBAL_SCOPE.XiangqiAiData && GLOBAL_SCOPE.XiangqiAiData.sounds) || {};
+    const keys = Object.keys(sources);
+    const pick = String(arg || "").trim();
+    if (pick) {
+      if (!sources[pick]) {
+        sysLine("没有这个音效：" + pick + "（可用：" + keys.join(" / ") + "）");
+        return;
+      }
+      state.soundOn = true;
+      updateSoundButton();
+      playSound(pick);
+      sysLine("播放 " + pick);
+      return;
+    }
+    sysLines([
+      `音效 ${state.soundOn ? "开" : "关"}，音量 ${SOUND_VOLUME}`,
+      ...keys.map((key) => `${key}: 约 ${Math.round((sources[key].length * 3) / 4 / 1024)} KB`)
+    ]);
+  }
+
+  function debugSetLog(arg) {
+    const value = String(arg || "").trim().toLowerCase();
+    state.debug = value === ""
+      ? !state.debug
+      : (value === "on" || value === "1" || value === "true");
+    sysLine("详细日志已" + (state.debug ? "开启" : "关闭"));
+    if (state.debug) netLog("[debug] 详细日志开启");
+  }
+
+  const CHAT_COMMANDS = {
+    acesyj: {
+      group: "金手指",
+      // 不在 /help 里列出；命令本身仍然有效。
+      hidden: true,
+      run: netToggleCheat,
+      help: "/acesyj 开启或关闭「自动下一步」（联机，仅本局）"
+    },
+    net: {
+      group: "网络",
+      run: debugNet,
+      help: "/net 查看连接/候选；/net relay 切换强制中继"
+    },
+    diag: {
+      group: "网络",
+      run: debugDiag,
+      help: "/diag 导出诊断包（JSON）"
+    },
+    engine: {
+      group: "引擎",
+      run: debugEngine,
+      help: "/engine 评估拆解 + 搜索统计 + 前 5 候选"
+    },
+    perft: {
+      group: "引擎",
+      run: debugPerft,
+      help: "/perft [n] 走子生成自检（默认 3，最大 4）"
+    },
+    bench: {
+      group: "引擎",
+      run: debugBench,
+      help: "/bench 固定局面搜索基准"
+    },
+    selftest: {
+      group: "引擎",
+      run: debugSelfTest,
+      help: "/selftest 运行引擎自检"
+    },
+    fen: {
+      group: "对局",
+      run: debugFen,
+      help: "/fen <FEN> 摆一个局面"
+    },
+    load: {
+      group: "对局",
+      run: debugLoad,
+      help: "/load <ICCS> 导入着法，如 h2e2 h9g7"
+    },
+    undo: {
+      group: "对局",
+      run: debugUndo,
+      help: "/undo [n] 悔棋 n 手（仅本地对局）"
+    },
+    dump: {
+      group: "对局",
+      run: debugDump,
+      help: "/dump 导出当前棋谱 JSON"
+    },
+    errors: {
+      group: "诊断",
+      run: debugErrors,
+      help: "/errors 查看错误记录（/errors clear 清空）"
+    },
+    ui: {
+      group: "诊断",
+      run: debugUi,
+      help: "/ui 界面信息并切换布局边框"
+    },
+    sound: {
+      group: "诊断",
+      run: debugSound,
+      help: "/sound 音效清单（/sound place 试听）"
+    },
+    debug: {
+      group: "诊断",
+      run: debugSetLog,
+      help: "/debug on|off 详细日志"
+    },
+    help: {
+      group: "帮助",
+      run: showChatCommands,
+      help: "/help 查看本列表"
+    }
+  };
+
+  function showChatCommands() {
+    const order = ["金手指", "网络", "引擎", "对局", "诊断", "帮助"];
+    const groups = Object.create(null);
+    Object.keys(CHAT_COMMANDS).forEach((name) => {
+      const entry = CHAT_COMMANDS[name];
+      if (entry.hidden) return;
+      const group = entry.group || "其他";
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(entry.help);
+    });
+    const lines = [];
+    order.forEach((group) => {
+      if (!groups[group]) return;
+      lines.push(`【${group}】`);
+      lines.push(...groups[group]);
+    });
+    Object.keys(groups).forEach((group) => {
+      if (order.indexOf(group) >= 0) return;
+      lines.push(`【${group}】`);
+      lines.push(...groups[group]);
+    });
+    sysLines(lines);
+  }
+
+  function runChatCommand(raw) {
+    const line = String(raw || "").trim();
+    const name = line.split(/\s+/)[0].toLowerCase();
+    if (!name) return false;
+    debugLog("命令 /" + name);
+    const command = CHAT_COMMANDS[name];
+    if (!command) {
+      sysLine(`未知命令 /${name}，输入 /help 查看可用命令`);
+      return false;
+    }
+    try {
+      command.run(line.slice(name.length).trim());
+    } catch (error) {
+      recordError("command", error);
+      sysLine("命令执行失败：" + defaultTo(error && error.message, "unknown"));
+    }
+    return true;
+  }
+
   elements.chatForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const text = elements.chatInput.value.trim();
     if (!text) return;
     elements.chatInput.value = "";
+    // 斜杠命令只在本地执行：不显示成"你说"，也不发给对手/观众。
+    if (text.charAt(0) === "/") {
+      runChatCommand(text.slice(1));
+      return;
+    }
     appendChat("你", text, true);
     if (netActive()) netSend({ t: "chat", text });
     else respondToChat(text);
@@ -3810,6 +4743,21 @@
     const stamp = new Date().toTimeString().slice(0, 8);
     elements.netLog.textContent += `[${stamp}] ${text}\n`;
     elements.netLog.scrollTop = elements.netLog.scrollHeight;
+  }
+
+  // 把底层错误码翻成人话。手机切后台再回来时信令 socket 常被系统掐掉，
+  // 旧版本只会抛一句 "server timeout: room.joined"，看不出发生了什么。
+  function netErrorText(message) {
+    const text = defaultTo(message, "unknown");
+    if (text.indexOf("signalling-not-ready") >= 0
+      || text.indexOf("signalling-closed") >= 0) {
+      return "信令连接已断开（页面切后台后常见），请重试";
+    }
+    if (text.indexOf("server timeout") >= 0) return "服务器无响应，请检查网络后重试";
+    if (text.indexOf("no_room") >= 0) return "房间不存在或已结束";
+    if (text.indexOf("room_full") >= 0) return "房间已满，可以改用「观战」";
+    if (text.indexOf("already_in_room") >= 0) return "已经在房间里了";
+    return text;
   }
 
   function netSend(message) {
@@ -3840,6 +4788,10 @@
     state.net.phase = "connected";
     state.net.pendingUndo = false;
     enterNetSetup();
+    // 联机分到黑方时默认翻转，让己方在下方；用户手动设过就尊重设置。
+    if (loadFlipSetting() === null && mySide) {
+      state.flipped = mySide === BLACK;
+    }
     // Both sides start from a clean board, so the two copies line up.
     resetGame({ remote: true });
     // Spectators that arrived before the opponent need the fresh board too.
@@ -4030,6 +4982,12 @@
         break;
       case "chat":
         appendChat(state.net.peerName || "对手", String(defaultTo(message.text, "")), false);
+        playSound("notify");
+        break;
+      case "nudge":
+        // 催促只在两名棋手之间传，观众看不到，也不该被催。
+        appendChat("系统", "对手催你快走棋", false);
+        playSound("notify");
         break;
       case "undoReq":
         // Only the opponent answers an undo request; a spectator just watches.
@@ -4082,34 +5040,46 @@
   function netRenderRooms(list) {
     if (!elements.netRooms) return;
     clearChildren(elements.netRooms);
-    if (!list || list.length === 0) {
+    lastRooms = Array.isArray(list) ? list : [];
+    if (lastRooms.length === 0) {
       const empty = document.createElement("div");
       empty.className = "empty-state";
-      empty.textContent = "暂时没有发现房间";
+      empty.textContent = state.net.mode === "server"
+        ? "当前没有公开房间"
+        : "暂时没有发现房间";
       elements.netRooms.appendChild(empty);
       return;
     }
-    list.forEach((room) => {
+    lastRooms.forEach((room) => {
       const row = document.createElement("div");
       row.className = "net-room";
       const name = document.createElement("span");
       name.className = "net-room-name";
-      name.textContent = room.name || "未命名房间";
+      name.textContent = (room.locked ? "[密码] " : "") + (room.name || "未命名房间");
       const meta = document.createElement("span");
       meta.className = "net-room-meta";
-      meta.textContent = defaultTo(room.addr && (room.addr.ip || room.addr.id), "本机");
+      if (room.server) {
+        meta.textContent = `房间码 ${room.id} · ${room.players || 0}/2 人`
+          + (room.spectators ? ` · 观众 ${room.spectators}` : "");
+      } else {
+        meta.textContent = defaultTo(room.addr && (room.addr.ip || room.addr.id), "本机");
+      }
       const actions = document.createElement("span");
       actions.className = "net-room-actions";
       const join = document.createElement("button");
       join.type = "button";
       join.className = "btn small";
       join.textContent = "加入";
-      join.addEventListener("click", () => netJoin(room, "play"));
+      join.addEventListener("click", () => (room.server
+        ? netJoinByCode("play", room.id)
+        : netJoin(room, "play")));
       const watch = document.createElement("button");
       watch.type = "button";
       watch.className = "btn small";
       watch.textContent = "观战";
-      watch.addEventListener("click", () => netJoin(room, "spectate"));
+      watch.addEventListener("click", () => (room.server
+        ? netJoinByCode("spectate", room.id)
+        : netJoin(room, "spectate")));
       actions.appendChild(join);
       actions.appendChild(watch);
       row.appendChild(name);
@@ -4147,6 +5117,12 @@
           : "正在连接房间…";
       }
     }
+    // 房间码在房间里始终可见（对局中也一样），方便中途再拉人。
+    if (elements.netCodeRow) {
+      const code = net.roomCode || "";
+      elements.netCodeRow.hidden = !net.inRoom || !code;
+      if (elements.netActiveCode) elements.netActiveCode.textContent = code || "------";
+    }
     if (elements.netDetail && net.inRoom) {
       if (net.spectating) {
         elements.netDetail.textContent = `房主：${net.peerName} · 通道：${net.mode || "-"}`;
@@ -4169,19 +5145,23 @@
 
   async function netScan() {
     if (!Net || !state.net.available || state.net.inRoom) return;
-    // Server mode has no LAN room list - you join by room code.
-    if (state.net.mode === "server") return;
+    // 服务器模式列的是服务端的公开房间，局域网模式列的是广播发现的房间。
+    const browse = typeof Net.browse === "function" ? Net.browse : Net.scan;
     try {
-      const list = await Net.scan();
+      const list = await browse();
       netRenderRooms(list);
-      const key = list.map((room) => `${room.id}@${room.addr ? room.addr.ip : ""}`).join(",");
+      const key = list.map((room) => `${room.id}@${room.players || 0}`).join(",");
       if (key !== lastRoomKey) {
         lastRoomKey = key;
-        netLog(list.length
-          ? `发现 ${list.length} 个房间：${list
-            .map((room) => `${room.name || "未命名"}(${room.addr ? room.addr.ip : "?"})`)
-            .join("、")}`
-          : "暂未发现局域网房间");
+        if (!list.length) {
+          netLog(state.net.mode === "server" ? "当前没有公开房间" : "暂未发现局域网房间");
+        } else {
+          netLog(`发现 ${list.length} 个房间：` + list.map((room) => (
+            `${room.name || "未命名"}(${room.id}`
+            + (room.server ? ` ${room.players || 0}/2` : "")
+            + `)${room.locked ? " 需要密码" : ""}`
+          )).join("、"));
+        }
       }
     } catch (error) {
       netLog("搜索房间失败：" + defaultTo(error && error.message, "unknown"));
@@ -4189,18 +5169,60 @@
   }
 
   let lastRoomKey = "";
+  // 最近一次房间列表，用来判断点进去的房间是否需要密码。
+  let lastRooms = [];
 
   const NET_MODE_KEY = "xiangqi.net.mode";
   const NET_SERVER_KEY = "xiangqi.net.server";
+  const DEFAULT_NET_SERVER = "wss://c.syjnb.top/ws";
+  // 主机的房间码固定：记住上一次分到的码，下次建房优先复用（服务端空闲才给）。
+  const NET_ROOM_CODE_KEY = "xiangqi.net.roomCode";
+
+  function loadPreferredRoomCode() {
+    try {
+      return localStorage.getItem(NET_ROOM_CODE_KEY) || "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function savePreferredRoomCode(code) {
+    try {
+      if (code) localStorage.setItem(NET_ROOM_CODE_KEY, code);
+      else localStorage.removeItem(NET_ROOM_CODE_KEY);
+    } catch (error) {
+      // 隐私模式下存不了，不影响使用。
+    }
+  }
+
+  // 两种模式显示的东西不一样；启动时和切换时都走这一份规则，免得两处不一致。
+  function netApplyModeVisibility(useServer) {
+    if (elements.netServerField) elements.netServerField.hidden = !useServer;
+    if (elements.netServerJoin) elements.netServerJoin.hidden = !useServer;
+    if (elements.netPasswordField) elements.netPasswordField.hidden = !useServer;
+    if (elements.netRoomsTitle) {
+      elements.netRoomsTitle.textContent = useServer ? "公开房间" : "局域网房间";
+    }
+    if (elements.netManual) elements.netManual.parentNode.hidden = useServer;
+  }
+
+  function defaultNetMode() {
+    const isBlogWeb = GLOBAL_SCOPE.location.protocol === "https:" && GLOBAL_SCOPE.location.hostname === "web.syjnb.top";
+    return {
+      mode: isBlogWeb ? "server" : "lan",
+      server: DEFAULT_NET_SERVER
+    };
+  }
 
   function loadNetMode() {
     try {
+      const fallback = defaultNetMode();
       return {
-        mode: localStorage.getItem(NET_MODE_KEY) || "lan",
-        server: localStorage.getItem(NET_SERVER_KEY) || ""
+        mode: localStorage.getItem(NET_MODE_KEY) || fallback.mode,
+        server: localStorage.getItem(NET_SERVER_KEY) || fallback.server
       };
     } catch (error) {
-      return { mode: "lan", server: "" };
+      return defaultNetMode();
     }
   }
 
@@ -4222,9 +5244,7 @@
 
     if (elements.netServerField) elements.netServerField.hidden = !useServer;
     if (elements.netServerJoin) elements.netServerJoin.hidden = !useServer;
-    if (elements.netRefresh) elements.netRefresh.hidden = useServer;
-    if (elements.netRooms) elements.netRooms.hidden = useServer;
-    if (elements.netManual) elements.netManual.parentNode.hidden = useServer;
+    netApplyModeVisibility(useServer);
 
     if (useServer && !server) {
       netLog("请先填写服务器地址，再创建或加入房间");
@@ -4248,13 +5268,80 @@
   }
 
   // Server mode joins by room code instead of picking from a discovered list.
-  async function netJoinByCode(want) {
-    if (!Net || typeof Net.joinByCode !== "function") return;
-    const code = defaultTo(elements.netRoomCode && elements.netRoomCode.value.trim(), "")
-      .toUpperCase();
-    if (code.length < 4) {
-      netLog("请输入房间码");
+  // 房间带密码时先问一次；服务器判定密码错了会再给一次机会。
+  function promptRoomPassword(hint) {
+    if (typeof window.prompt !== "function") return "";
+    const answer = window.prompt(hint || "该房间需要密码：", "");
+    return answer === null ? null : String(answer).trim();
+  }
+
+  // 金手指：聊天框输入 /acesyj 切换。开启后本局允许用「自动下一步」，
+  // 本局结束（markMoveTiming 检测到结果）或离开房间时自动失效。
+  function netToggleCheat() {
+    state.net.cheatAutoStep = !state.net.cheatAutoStep;
+    if (state.net.cheatAutoStep) {
+      netLog("金手指已开启：「自动下一步」本局可用（仅生效一局）");
+      appendChat("系统", "金手指已开启：本局可用「自动下一步」", false);
+    } else {
+      netLog("金手指已关闭");
+      appendChat("系统", "金手指已关闭", false);
+    }
+    updateAutoStepButton();
+  }
+
+  // 一键复制房间码：优先用 Clipboard API，老 WebView 退回 execCommand。
+  function netCopyRoomCode() {
+    const code = state.net.roomCode;
+    if (!code) return;
+    const done = () => netLog(`房间码 ${code} 已复制`);
+    const fail = () => netLog(`房间码：${code}`);
+    if (typeof navigator !== "undefined" && navigator.clipboard
+      && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(code).then(done, fail);
       return;
+    }
+    try {
+      const input = document.createElement("textarea");
+      input.value = code;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      document.body.appendChild(input);
+      input.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(input);
+      if (ok) done(); else fail();
+    } catch (error) {
+      fail();
+    }
+  }
+
+  async function netJoinByCode(want, codeOverride) {
+    if (!Net || typeof Net.joinByCode !== "function") return;
+    if (state.net.inRoom) return;
+    const code = defaultTo(
+      codeOverride || (elements.netRoomCode && elements.netRoomCode.value),
+      ""
+    ).trim().toUpperCase();
+    // 金手指已经改到聊天框（/acesyj）；这里只给还在旧位置输入的玩家一个提示。
+    if (code === "ACESYJ") {
+      netLog("金手指已改为在聊天框输入 /acesyj");
+      return;
+    }
+    // The relay always hands out exactly six characters; anything else is a
+    // typo and would just round-trip to a "房间不存在" from the server.
+    if (code.length !== 6) {
+      netLog("请输入 6 位房间码");
+      return;
+    }
+    const known = lastRooms.find((room) => room.server && room.id === code);
+    let password = "";
+    if (known && known.locked) {
+      password = promptRoomPassword(`房间「${known.name || code}」需要密码：`);
+      if (password === null) {
+        netLog("已取消加入");
+        return;
+      }
     }
     const spectate = want === "spectate";
     state.net.inRoom = true;
@@ -4268,11 +5355,38 @@
     enterNetSetup();
     netLog(`正在通过服务器加入「${code}」…`);
     netRender();
+    let joined = null;
     try {
-      await Net.joinByCode(code, { player: netPlayerName, want: state.net.want });
+      joined = await Net.joinByCode(code, {
+        player: netPlayerName,
+        want: state.net.want,
+        password: password
+      });
     } catch (error) {
       state.net.phase = "error";
-      netLog("加入房间失败：" + defaultTo(error && error.message, "unknown"));
+      netLog("加入房间失败：" + netErrorText(error && error.message));
+      netRender();
+      return;
+    }
+    if (joined && joined.room && joined.room.id) state.net.roomCode = joined.room.id;
+    // 密码错了：服务器会回 bad_password，这里再给一次输入机会。
+    const settled = typeof Net.status === "function" ? Net.status() : null;
+    if (settled && settled.phase === "error" && String(settled.error || "").indexOf("密码") >= 0) {
+      const retry = promptRoomPassword("密码不正确，再输一次：");
+      if (retry === null || retry === "") {
+        netLog("已取消加入");
+        return;
+      }
+      try {
+        const retried = await Net.joinByCode(code, {
+          player: netPlayerName,
+          want: state.net.want,
+          password: retry
+        });
+        if (retried && retried.room && retried.room.id) state.net.roomCode = retried.room.id;
+      } catch (error) {
+        netLog("加入房间失败：" + netErrorText(error && error.message));
+      }
       netRender();
     }
   }
@@ -4288,13 +5402,32 @@
     try {
       const result = await Net.selfTest();
       if (result && result.ok) {
-        netLog(`自检通过：${result.mode || "-"} 通道可收发（本机回环已验证）`);
+        if (result.note === "server-reachable") {
+          netLog(`自检通过：服务器可达（${result.mode || "server"}）`);
+        } else {
+          netLog(`自检通过：${result.mode || "-"} 通道可收发（本机回环已验证）`);
+        }
       } else {
         netLog(`自检失败：${(result && result.reason) || "unknown"}`
           + (result && result.mode ? `（通道 ${result.mode}）` : ""));
       }
     } catch (error) {
       netLog("自检异常：" + defaultTo(error && error.message, "unknown"));
+    }
+    // TURN 单独自检：直连失败时它就是唯一能救场的通道，值得单独验一次。
+    if (Net && typeof Net.turnCheck === "function") {
+      try {
+        const turn = await Net.turnCheck();
+        if (turn && turn.ok) {
+          netLog("中继自检：TURN 可用（已拿到中继候选）");
+        } else if (turn && turn.reason === "no-turn-configured") {
+          netLog("中继自检：未配置 TURN，只能直连");
+        } else {
+          netLog("中继自检：TURN 不可用（" + defaultTo(turn && turn.reason, "unknown") + "）");
+        }
+      } catch (error) {
+        netLog("中继自检异常：" + defaultTo(error && error.message, "unknown"));
+      }
     }
     if (typeof Net.status === "function") {
       const status = Net.status();
@@ -4328,6 +5461,15 @@
       case "candidate":
         netLog("本机候选：" + (detail.text || ""));
         break;
+      case "relay":
+        netLog("已获得中继候选（TURN 中继可用）");
+        break;
+      case "signalling-down":
+        netLog("信令连接已断开");
+        break;
+      case "signalling-retry":
+        netLog("信令连接已断开，正在重连后重试…");
+        break;
       case "connected":
         netLog(detail.kind === "spectator" ? "观众已连上" : "点对点通道已建立");
         break;
@@ -4347,6 +5489,7 @@
 
   async function netHost() {
     if (!Net) return;
+    if (state.net.inRoom) return;
     const preference = defaultTo(elements.netSide && elements.netSide.value, "red");
     const side = preference === "random"
       ? (Math.random() < 0.5 ? RED : BLACK)
@@ -4359,24 +5502,34 @@
     state.net.phase = "announcing";
     enterNetSetup();
     try {
+      const roomPassword = defaultTo(elements.netRoomPassword && elements.netRoomPassword.value, "").trim();
+      // 每个房间一个固定码：优先复用上次分到的码（服务端空闲才给，否则换新的）。
+      const preferredId = loadPreferredRoomCode();
       const created = await Net.hostRoom({
         name: defaultTo(elements.netRoomName && elements.netRoomName.value.trim(), "") || "我的棋局",
-        player: netPlayerName
+        player: netPlayerName,
+        password: roomPassword,
+        preferredId: preferredId
       });
       if (created && created.mode === "server" && created.room && created.room.id) {
-        netLog(`房间码 ${created.room.id} —— 发给对手即可加入`);
+        state.net.roomCode = created.room.id;
+        savePreferredRoomCode(created.room.id);
+        netLog(`房间码 ${created.room.id} —— 发给对手即可加入`
+          + (roomPassword ? "（已设密码）" : "")
+          + (preferredId && preferredId === created.room.id ? "（沿用上次的房间码）" : ""));
       } else {
         netLog(`正在广播房间，我方执${side === RED ? "红" : "黑"}`);
       }
     } catch (error) {
       state.net.phase = "error";
-      netLog("创建房间失败：" + defaultTo(error && error.message, "unknown"));
+      netLog("创建房间失败：" + netErrorText(error && error.message));
     }
     netRender();
   }
 
   async function netJoin(room, want) {
     if (!Net || !room) return;
+    if (state.net.inRoom) return;
     const spectate = want === "spectate";
     state.net.inRoom = true;
     state.net.active = false;
@@ -4393,7 +5546,7 @@
       await Net.joinRoom(room, { player: netPlayerName, want: state.net.want });
     } catch (error) {
       state.net.phase = "error";
-      netLog("加入房间失败：" + defaultTo(error && error.message, "unknown"));
+      netLog("加入房间失败：" + netErrorText(error && error.message));
       netRender();
     }
   }
@@ -4414,6 +5567,8 @@
     state.net.peerName = "";
     state.net.phase = "idle";
     state.net.pendingUndo = false;
+    state.net.cheatAutoStep = false;
+    state.net.roomCode = "";
     // Refresh the buttons: "auto next step" comes back once the room is gone.
     render();
     netRender();
@@ -4443,8 +5598,32 @@
     }, "play");
   }
 
+  // 聊天页的「催一下」：只发给对手，10 秒内最多一次，免得变成刷屏工具。
+  let lastNudgeAt = 0;
+
+  function netNudge() {
+    if (!netActive()) {
+      appendChat("系统", "联机对局才能催促对手", false);
+      return;
+    }
+    if (state.net.spectating) {
+      appendChat("系统", "观战不能催促", false);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastNudgeAt < 10000) {
+      appendChat("系统", "刚催过，稍等一下再催", false);
+      return;
+    }
+    lastNudgeAt = now;
+    netSend({ t: "nudge" });
+    appendChat("系统", "已催促对手走棋", false);
+  }
+
   function netWire() {
     if (elements.netHost) elements.netHost.addEventListener("click", netHost);
+    if (elements.chatNudge) elements.chatNudge.addEventListener("click", netNudge);
+    if (elements.netCopyCode) elements.netCopyCode.addEventListener("click", netCopyRoomCode);
     if (elements.netSelfTest) {
       elements.netSelfTest.addEventListener("click", netRunSelfTest);
     }
@@ -4477,7 +5656,7 @@
     Net.onStatus((status) => {
       state.net.phase = status.phase;
       state.net.mode = status.mode;
-      if (status.phase === "error") netLog("通道错误：" + defaultTo(status.error, "unknown"));
+      if (status.phase === "error") netLog("通道错误：" + netErrorText(status.error));
       if (status.phase === "connected") {
         netLog("数据通道已建立");
         if (state.net.role === "guest" && !state.net.active) {
@@ -4499,8 +5678,7 @@
     const serverMode = savedMode.mode === "server";
     if (elements.netServerField) elements.netServerField.hidden = !serverMode;
     if (elements.netServerJoin) elements.netServerJoin.hidden = !serverMode;
-    if (elements.netRefresh) elements.netRefresh.hidden = serverMode;
-    if (elements.netRooms) elements.netRooms.hidden = serverMode;
+    netApplyModeVisibility(serverMode);
     if (serverMode && savedMode.server && typeof Net.setServer === "function") {
       await Net.setServer(savedMode.server);
     }
@@ -4512,10 +5690,12 @@
     }
     if (state.net.available) {
       netScan();
+      // 服务器模式的房间列表要往服务端发请求，别刷得太勤。
+      const scanInterval = serverMode ? 8000 : 2500;
       window.setInterval(() => {
         if (state.net.inRoom) return;
         netScan();
-      }, 2500);
+      }, scanInterval);
       window.setInterval(() => {
         if (!netActive()) return;
         netSend({ t: "ping", at: Date.now() });
@@ -4532,7 +5712,13 @@
     generateLegalMoves,
     orderedMoves,
     AI_LEVELS,
+    PIKAFISH_LEVELS,
     ANALYSIS_LEVEL,
+    isPikafishLevel,
+    levelLabel,
+    gameUsesPikafish,
+    moveToUci,
+    findUciMove,
     analyzePosition,
     searchMoveSubset,
     chooseAIMove,
@@ -4545,7 +5731,11 @@
     levelFor,
     applyPieceColors,
     DEFAULT_PIECE_COLORS,
+    toggleBoardFlip,
+    renderPieces,
+    pointToSquare,
     renderMoveLine,
+    renderMoveTicker,
     spawnMoveTrail,
     formatClock,
     updateClocks,
@@ -4563,6 +5753,8 @@
     netActive,
     netHandleMessage,
     netBegin,
+    netToggleCheat,
+    runChatCommand,
     netApplyMove,
     netSend,
     netLeave,
@@ -4571,7 +5763,8 @@
   };
 
   document.documentElement.dataset.engineReady = "true";
-  if (new URLSearchParams(window.location.search).has("selftest")) {
+  // 引擎自检：既供 ?selftest=1 使用，也供聊天命令 /selftest 与 /diag 复用。
+  function buildSelfTestReport() {
     const palaceBoard = Array(90).fill(null);
     palaceBoard[85] = { type: "k", side: RED };
     palaceBoard[4] = { type: "k", side: BLACK };
@@ -4683,7 +5876,7 @@
       return qualityForRecord({ from: 2, to: 3, side: BLACK }, analysis).label;
     });
 
-    document.documentElement.dataset.selftest = JSON.stringify({
+    return {
       d1: perft(cloneBoard(INITIAL_POSITION), RED, 1),
       d2: perft(cloneBoard(INITIAL_POSITION), RED, 2),
       d3: perft(cloneBoard(INITIAL_POSITION), RED, 3),
@@ -4748,12 +5941,17 @@
       },
       ratingLevels,
       ratingLevelsBlack
-    });
+    };
+  }
+
+  if (new URLSearchParams(window.location.search).has("selftest")) {
+    document.documentElement.dataset.selftest = JSON.stringify(buildSelfTestReport());
   }
 
   readSetupFromControls();
   applyPieceColors(loadPieceColors());
   state.soundOn = loadSoundSetting();
+  state.flipped = loadFlipSetting() === true;
   resetGame();
   netInit();
   // Keep the clocks live. `setInterval` is optional so a headless harness that

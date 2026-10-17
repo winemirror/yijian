@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="弈鉴">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>弈鉴 · 本地中国象棋</title>
+  <title>弈鉴 3.16b · 皮卡鱼测试版</title>
   <script>
     /* Compatibility guard. Runs before any modern syntax is parsed, so an old
        WebView shows a readable message instead of a blank white page. This
@@ -88,7 +88,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=3.15.0-20261018">
+  <link rel="stylesheet" href="styles.css?v=3.16.0b3-20261018">
 </head>
 <body>
   <noscript>
@@ -102,7 +102,7 @@
         <div class="brand-mark">弈</div>
         <div>
           <h1>弈鉴</h1>
-          <p>本地中国象棋 · 人机对弈与分析</p>
+          <p>本地中国象棋 · 皮卡鱼测试版</p>
         </div>
       </div>
 
@@ -116,6 +116,9 @@
             <option value="ai:medium">AI · 初级</option>
             <option value="ai:hard">AI · 中级</option>
             <option value="ai:master">AI · 高级</option>
+            <option value="pikafish:fast">皮卡鱼 · 快速（云端）</option>
+            <option value="pikafish:standard">皮卡鱼 · 标准（云端）</option>
+            <option value="pikafish:deep">皮卡鱼 · 深度（云端）</option>
             <option value="ai:idiot">AI · 瞎几把下</option>
           </select>
         </label>
@@ -128,6 +131,9 @@
             <option value="ai:medium" selected>AI · 初级</option>
             <option value="ai:hard">AI · 中级</option>
             <option value="ai:master">AI · 高级</option>
+            <option value="pikafish:fast">皮卡鱼 · 快速（云端）</option>
+            <option value="pikafish:standard">皮卡鱼 · 标准（云端）</option>
+            <option value="pikafish:deep">皮卡鱼 · 深度（云端）</option>
             <option value="ai:idiot">AI · 瞎几把下</option>
           </select>
         </label>
@@ -423,8 +429,9 @@
     </main>
   </div>
 
-  <script src="ai-data.js?v=3.15.0-20261018"></script>
-  <script src="net.js?v=3.15.0-20261018"></script>
-  <script src="app.js?v=3.15.0-20261018"></script>
+  <script src="ai-data.js?v=3.16.0b3-20261018"></script>
+  <script src="net.js?v=3.16.0b3-20261018"></script>
+  <script src="pikafish.js?v=3.16.0b3-20261018"></script>
+  <script src="app.js?v=3.16.0b3-20261018"></script>
 </body>
 </html>

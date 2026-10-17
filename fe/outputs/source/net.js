@@ -138,6 +138,7 @@
   function wsTransport(url) {
     var socket = null;
     var readyPromise = null;
+    var infoPromise = null;
     var blobHandler = null;
     var inbox = [];
     var waiters = [];
@@ -151,11 +152,18 @@
       return true;
     }
 
+    // 发不出去就当场报错，别让调用方傻等超时。
+    function postOrThrow(message) {
+      if (!post(message)) throw new Error("signalling-not-ready");
+    }
+
     // Resolves on the next message of `type`, or on any `error` so a server
     // rejection surfaces as an exception instead of a timeout.
     function waitFor(type, timeoutMs) {
       for (var index = 0; index < inbox.length; index += 1) {
-        if (inbox[index].t === type || inbox[index].t === "error") {
+        // Only a reply of the expected type; a parked error must never satisfy
+        // a later, unrelated request.
+        if (inbox[index].t === type) {
           return Promise.resolve(inbox.splice(index, 1)[0]);
         }
       }
@@ -170,18 +178,38 @@
           scope.clearTimeout(timer);
           resolve(message);
         };
+        waiter.reject = function (error) {
+          scope.clearTimeout(timer);
+          reject(error);
+        };
         waiters.push(waiter);
       });
     }
 
     function deliver(message) {
+      // An error answers whichever request is pending right now. Parking it
+      // would let a stale failure poison a much later call.
+      if (message.t === "error") {
+        if (waiters.length) waiters.shift().resolve(message);
+        return;
+      }
       for (var index = 0; index < waiters.length; index += 1) {
-        if (waiters[index].type === message.t || message.t === "error") {
+        if (waiters[index].type === message.t) {
           waiters.splice(index, 1)[0].resolve(message);
           return;
         }
       }
       inbox.push(message);
+    }
+
+    // 连接断了就别让调用方干等到超时：手机把页面切到后台时 iOS 会直接掐掉
+    // WebSocket，此时 post() 会静默失败，等满 8 秒只会得到一句没头绪的
+    // "server timeout"。这里统一把在等的请求直接判失败。
+    function failWaiters(reason) {
+      var pending = waiters.splice(0, waiters.length);
+      for (var index = 0; index < pending.length; index += 1) {
+        if (pending[index].reject) pending[index].reject(new Error(reason));
+      }
     }
 
     function connect() {
@@ -205,6 +233,18 @@
         };
         ws.onerror = function () {
           reject(new Error("server unreachable"));
+        };
+        ws.onclose = function () {
+          // 允许下一次 connect() 重新开一条；否则 readyPromise 会一直是
+          // 这条已死连接的 promise，重连永远发生不了。
+          if (socket === ws) {
+            socket = null;
+            readyPromise = null;
+            infoPromise = null;
+          }
+          failWaiters("signalling-closed");
+          reconnectCount += 1;
+          emitDebug("signalling-down", {});
         };
         ws.onmessage = function (event) {
           var message = null;
@@ -242,23 +282,35 @@
       onBlob: function (cb) { blobHandler = cb; },
       ready: connect,
       info: function () {
-        return connect().then(function () {
-          // The ICE config rides on "welcome", which can land just after the
-          // socket opens - wait for it instead of returning an empty list.
+        // The ICE config rides on "welcome", which can land just after the
+        // socket opens - wait for it instead of returning an empty list. The
+        // frame is only sent once per socket, so cache the handshake result;
+        // otherwise a second caller (self test, status refresh) waits forever
+        // for a frame that was already consumed.
+        if (infoPromise) return infoPromise;
+        infoPromise = connect().then(function () {
           return waitFor("welcome");
         }).then(function () {
           return { ice: iceServers, ips: [], serverId: selfId };
         });
+        infoPromise.catch(function () { infoPromise = null; });
+        return infoPromise;
       },
       poll: function () { return Promise.resolve({ cursor: 0, blobs: [] }); },
       rooms: function () {
         return connect()
-          .then(function () { post({ t: "room.list" }); return waitFor("room.list"); })
+          .then(function () { postOrThrow({ t: "room.list" }); return waitFor("room.list"); })
           .then(function (message) { return expect(message).rooms || []; });
       },
       announce: function (room) {
         return connect().then(function () {
-          post({ t: "room.create", name: room && room.name, visibility: "public" });
+          postOrThrow({
+            t: "room.create",
+            name: room && room.name,
+            visibility: "public",
+            password: (room && room.password) || "",
+            preferredId: (room && room.preferredId) || ""
+          });
           return waitFor("room.joined");
         }).then(function (message) {
           expect(message);
@@ -277,12 +329,18 @@
         });
       },
       // Server mode only: join by room code and learn which peer is the hub.
-      joinSignalling: function (code, want) {
+      joinSignalling: function (code, want, password) {
         return connect().then(function () {
-          post({
+          // 先探一次半开连接：手机切后台后 NAT 映射可能已经失效，本地 socket
+          // 还显示 open，发出去的报文却石沉大海。ping 不通就往上抛，让上层重连。
+          post({ t: "ping", at: now() });
+          return waitFor("pong", 2500);
+        }).then(function () {
+          postOrThrow({
             t: "room.join",
             roomId: String(code || "").toUpperCase(),
-            want: want === "spectate" ? "spectate" : "play"
+            want: want === "spectate" ? "spectate" : "play",
+            password: password || ""
           });
           return waitFor("room.joined");
         }).then(function (message) {
@@ -307,6 +365,7 @@
         try { if (socket) socket.close(); } catch (error) { /* gone */ }
         socket = null;
         readyPromise = null;
+        infoPromise = null;
         inbox = [];
         waiters = [];
       }
@@ -498,7 +557,9 @@
     // "auto" keeps the LAN chain; "server" uses the relay for signalling.
     prefer: "auto",
     serverUrl: "",
-    iceServers: []
+    iceServers: [],
+    // 调试：强制只走中继（TURN），用于验证 relay 候选。
+    relayOnly: false
   };
   var announceTimer = null;
   var pollTimer = null;
@@ -508,6 +569,13 @@
   // which is what lets a third device watch without disturbing the game.
   var peers = Object.create(null);
   var localIceLogged = 0;
+  var relayLogged = 0;
+  // 诊断计数：候选类型分布 / 首次中继候选 / 信令重连次数。
+  var candidateTypes = { host: 0, srflx: 0, prflx: 0, relay: 0 };
+  var relayCandidate = "";
+  var reconnectCount = 0;
+  // Reused by hostRoom so a double tap cannot spawn two rooms.
+  var hostingPromise = null;
 
   function emit(list, payload) {
     for (var index = 0; index < list.length; index += 1) {
@@ -549,8 +617,30 @@
       prefer: state.prefer,
       serverUrl: state.serverUrl,
       error: state.error,
-      localIps: state.localIps.slice()
+      localIps: state.localIps.slice(),
+      // 服务端有没有下发 TURN，UI 用它提示"直连 / 可中继"。
+      turn: turnServers().length
     };
+  }
+
+  // TURN 条目由信令服务端下发（带 coturn 的临时凭证）。
+  function isTurnServer(server) {
+    if (!server) return false;
+    var urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    for (var index = 0; index < urls.length; index += 1) {
+      var url = String(urls[index] || "");
+      if (url.indexOf("turn:") === 0 || url.indexOf("turns:") === 0) return true;
+    }
+    return false;
+  }
+
+  function turnServers() {
+    var list = state.iceServers || [];
+    var out = [];
+    for (var index = 0; index < list.length; index += 1) {
+      if (isTurnServer(list[index])) out.push(list[index]);
+    }
+    return out;
   }
 
   // Records where this device sits on the network, so the UI can show it and
@@ -649,6 +739,7 @@
   // Drops every connection and the current transport, ready for a mode switch.
   function resetTransport() {
     closePeers();
+    hostingPromise = null;
     stopPolling();
     if (announceTimer) scope.clearInterval(announceTimer);
     announceTimer = null;
@@ -674,20 +765,37 @@
     peers = Object.create(null);
     state.peer = null;
     localIceLogged = 0;
+    relayLogged = 0;
   }
 
   function newPeerConnection(peer) {
-    var connection = new scope.RTCPeerConnection({
+    var config = {
       iceServers: state.iceServers.length ? state.iceServers : ICE_SERVERS
-    });
+    };
+    if (state.relayOnly) config.iceTransportPolicy = "relay";
+    var connection = new scope.RTCPeerConnection(config);
     connection.onicecandidate = function (event) {
       if (!event.candidate) return;
+      var candidateText = String(event.candidate.candidate || "");
+      var typeMatch = / typ (host|srflx|prflx|relay)/.exec(candidateText);
+      if (typeMatch) {
+        candidateTypes[typeMatch[1]] += 1;
+        if (typeMatch[1] === "relay" && !relayCandidate) {
+          relayCandidate = candidateText.slice(0, 110);
+        }
+      }
+      // A relayed candidate means the TURN allocation succeeded, i.e. the
+      // credentials the server handed out actually work against coturn.
+      if (!relayLogged && / typ relay/.test(candidateText)) {
+        relayLogged += 1;
+        emitDebug("relay", { text: candidateText.slice(0, 110) });
+      }
       // Log the first few local candidates: whether they carry a real LAN
       // address or an mDNS placeholder decides if the peer can reach us.
       if (localIceLogged < 3) {
         localIceLogged += 1;
         emitDebug("candidate", {
-          text: String(event.candidate.candidate || "").slice(0, 110)
+          text: candidateText.slice(0, 110)
         });
       }
       if (peer.addr) {
@@ -900,6 +1008,42 @@
 
     status: status,
 
+    // 调试用：脱敏后的连接诊断。TURN 凭证只报告"有没有"，绝不带出内容。
+    diag: function () {
+      var ice = [];
+      var list = state.iceServers || [];
+      for (var index = 0; index < list.length; index += 1) {
+        ice.push({
+          urls: list[index].urls,
+          hasCredential: !!(list[index].username && list[index].credential)
+        });
+      }
+      return {
+        mode: state.mode,
+        prefer: state.prefer,
+        phase: state.phase,
+        serverUrl: state.serverUrl,
+        turn: turnServers().length,
+        ice: ice,
+        candidates: {
+          host: candidateTypes.host,
+          srflx: candidateTypes.srflx,
+          prflx: candidateTypes.prflx,
+          relay: candidateTypes.relay
+        },
+        relay: relayCandidate,
+        reconnects: reconnectCount,
+        relayOnly: !!state.relayOnly,
+        localIps: state.localIps.slice(),
+        peers: peerCounts()
+      };
+    },
+
+    setRelayOnly: function (on) {
+      state.relayOnly = !!on;
+      return state.relayOnly;
+    },
+
     onStatus: function (cb) { listeners.status.push(cb); },
     onMessage: function (cb) { listeners.message.push(cb); },
     onRooms: function (cb) { listeners.rooms.push(cb); },
@@ -917,13 +1061,60 @@
       });
     },
 
+    // 房间浏览器：服务器模式列出公开房间（room.list），局域网模式退回广播扫描。
+    // 两种来源统一成同一形状，UI 只按 server 字段区分怎么加入。
+    browse: function () {
+      return api.ready().then(function () {
+        if (!state.transport) return [];
+        if (state.transport.push) {
+          return Promise.resolve(state.transport.rooms())
+            .then(function (list) {
+              return (list || []).map(function (room) {
+                return {
+                  id: String(room.id || ""),
+                  name: room.name || "",
+                  players: Number(room.players || 0),
+                  spectators: Number(room.spectators || 0),
+                  locked: !!room.locked,
+                  private: !!room.private,
+                  server: true
+                };
+              });
+            })
+            .catch(function () { return []; });
+        }
+        return api.scan().then(function (list) {
+          return list.map(function (room) {
+            return {
+              id: room.id,
+              name: room.name,
+              players: 0,
+              spectators: 0,
+              locked: false,
+              private: false,
+              server: false,
+              addr: room.addr
+            };
+          });
+        });
+      });
+    },
+
     hostRoom: function (options) {
+      // A double tap used to send two room.create frames: the server created
+      // one room and rejected the second with already_in_room, which then
+      // surfaced as a scary "通道错误" and a duplicated room-code line. Share
+      // the in-flight promise so the second tap is a no-op instead.
+      if (hostingPromise) return hostingPromise;
       var room = {
         id: options.id || randomId(),
         name: options.name || "YiJian",
-        role: "host"
+        role: "host",
+        password: options.password || "",
+        // 固定房间码：让服务端优先复用上次分到的码（空闲才给）。
+        preferredId: options.preferredId || ""
       };
-      return api.ready().then(function () {
+      hostingPromise = api.ready().then(function () {
         if (!state.transport) {
           fail("no-transport");
           return status();
@@ -936,9 +1127,13 @@
         // The relay server assigns the room code, so wait for its answer
         // before deciding what to display.
         return Promise.resolve(state.transport.announce(room)).then(function (info) {
-          if (info && info.id) state.room.id = info.id;
-          if (info && info.name) state.room.name = info.name;
-          emitDebug("announce", state.room);
+          // Mutate the local room, not state.room: a second, concurrent
+          // hostRoom call may already have replaced the shared slot, and
+          // rewriting it here is what made a rejected create report the other
+          // call's room code.
+          if (info && info.id) room.id = info.id;
+          if (info && info.name) room.name = info.name;
+          emitDebug("announce", room);
           // Re-announcing is a LAN thing; asking the server to create the room
           // again every 1.5s would spawn a room per tick.
           if (!state.transport.push) {
@@ -955,6 +1150,11 @@
           return status();
         });
       });
+      hostingPromise = hostingPromise.then(function (result) {
+        hostingPromise = null;
+        return result;
+      });
+      return hostingPromise;
     },
 
     joinRoom: function (target, options) {
@@ -1011,6 +1211,17 @@
     // Server mode: join by room code. Everyone dials the room's host, exactly
     // like the LAN path does.
     joinByCode: function (code, options) {
+      var want = options && options.want;
+      var password = (options && options.password) || "";
+      function joinOnce() {
+        return state.transport.joinSignalling(code, want, password);
+      }
+      // 手机切到后台再回来时，信令 socket 常常已经被系统掐掉，第一次必然失败。
+      // 这类错误重连一次就能好，不该让用户重新点一遍。
+      function isTransportError(error) {
+        return /signalling-not-ready|signalling-closed|server unreachable|no-websocket|timeout: pong/
+          .test(describe(error));
+      }
       return api.ready().then(function () {
         if (!state.transport || typeof state.transport.joinSignalling !== "function") {
           fail("no-server");
@@ -1025,7 +1236,21 @@
         state.phase = "connecting";
         state.error = "";
         if (state.transport.onBlob) state.transport.onBlob(handleBlob);
-        return state.transport.joinSignalling(code, options && options.want)
+        return joinOnce()
+          .catch(function (error) {
+            if (!isTransportError(error)) throw error;
+            emitDebug("signalling-retry", {});
+            resetTransport();
+            state.room = { id: String(code || "").toUpperCase(), name: "", role: "guest" };
+            state.phase = "connecting";
+            return api.ready().then(function () {
+              if (!state.transport || typeof state.transport.joinSignalling !== "function") {
+                throw new Error("no-server");
+              }
+              if (state.transport.onBlob) state.transport.onBlob(handleBlob);
+              return joinOnce();
+            });
+          })
           .then(function (info) {
             state.room = { id: info.room.id, name: info.room.name, role: "guest" };
             var hostId = info.hostId;
@@ -1086,6 +1311,16 @@
     selfTest: function () {
       return api.ready().then(function () {
         if (!state.transport) return { ok: false, reason: "no-transport", mode: null };
+        // Push transports (the relay server) have no loopback path: sending a
+        // packet to 127.0.0.1 would post a "signal" before we are in any room,
+        // which the server rejects with not_in_room. Reachability there is
+        // proven by completing the handshake and reading its welcome frame.
+        if (state.transport.push) {
+          return Promise.resolve(state.transport.info()).then(function (info) {
+            if (info && info.ice) return { ok: true, reason: "", note: "server-reachable", mode: state.mode };
+            return { ok: false, reason: "server-no-welcome", note: "server-reachable", mode: state.mode };
+          });
+        }
         var token = "selftest-" + randomId();
         var from = 0;
         // wait=0: the self test must not sit on the long poll for 25 seconds.
@@ -1110,6 +1345,55 @@
         });
       }).catch(function (error) {
         return { ok: false, reason: describe(error), mode: state.mode };
+      });
+    },
+
+    // TURN 可达性自检：用 iceTransportPolicy "relay" 起一条临时连接，
+    // 只收集中继候选。能拿到 relay 候选，就说明服务端下发的临时凭证
+    // 以及公网上的 coturn 都是通的（两端都在 CGNAT 后面时的救命通道）。
+    turnCheck: function (timeoutMs) {
+      var servers = turnServers();
+      if (!servers.length) return Promise.resolve({ ok: false, reason: "no-turn-configured" });
+      if (!hasPeerConnection()) return Promise.resolve({ ok: false, reason: "no-webrtc" });
+      return new Promise(function (resolve) {
+        var connection = null;
+        var settled = false;
+        var timer = scope.setTimeout(function () { finish(null); }, timeoutMs || 4000);
+
+        function finish(candidate) {
+          if (settled) return;
+          settled = true;
+          scope.clearTimeout(timer);
+          try { if (connection) connection.close(); } catch (error) { /* gone */ }
+          resolve(candidate
+            ? { ok: true, reason: "", candidate: String(candidate.candidate || "").slice(0, 90) }
+            : { ok: false, reason: "no-relay-candidate" });
+        }
+
+        try {
+          connection = new scope.RTCPeerConnection({
+            iceServers: servers,
+            iceTransportPolicy: "relay"
+          });
+        } catch (error) {
+          finish(null);
+          return;
+        }
+        connection.onicecandidate = function (event) {
+          if (!event.candidate) return;
+          if (/ typ relay/.test(String(event.candidate.candidate || ""))) finish(event.candidate);
+        };
+        connection.onicegatheringstatechange = function () {
+          if (connection.iceGatheringState === "complete") finish(null);
+        };
+        try {
+          connection.createDataChannel("turn-check");
+          Promise.resolve(connection.createOffer())
+            .then(function (offer) { return connection.setLocalDescription(offer); })
+            .catch(function () { finish(null); });
+        } catch (error) {
+          finish(null);
+        }
       });
     },
 
@@ -1159,6 +1443,7 @@
     },
 
     leave: function () {
+      hostingPromise = null;
       if (announceTimer) scope.clearInterval(announceTimer);
       announceTimer = null;
       stopPolling();

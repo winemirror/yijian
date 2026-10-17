@@ -270,6 +270,9 @@ select:focus {
 .game-column {
   min-width: 0;
   display: grid;
+  /* The implicit grid track is max-content-sized, so a long move ticker can
+     push every status child far outside the screen. Keep the track shrinkable. */
+  grid-template-columns: minmax(0, 1fr);
   justify-items: center;
 }
 
@@ -291,6 +294,25 @@ select:focus {
 
 .player-strip.red {
   margin-top: 12px;
+}
+
+/* 棋盘翻转：把红方信息条移到上方、黑方移到下方，和棋子方向保持一致。 */
+.game-column.flipped .player-strip.red {
+  order: 1;
+  margin: 0 0 12px;
+}
+
+.game-column.flipped .board-stage {
+  order: 2;
+}
+
+.game-column.flipped .player-strip.black {
+  order: 3;
+  margin: 12px 0 0;
+}
+
+.game-column.flipped .game-status {
+  order: 4;
 }
 
 .player-main {
@@ -716,6 +738,73 @@ select:focus {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+}
+
+/* 走法播报：一行可横向滚动的横幅，最后一手始终在最右侧。 */
+.move-ticker {
+  flex: 0 0 100%;
+  width: 100%;
+  /* flex 子项默认 min-width:auto 会被内容撑开，必须显式压住，
+     否则对局越长整条越宽，最后溢出屏幕。 */
+  max-width: 100%;
+  min-width: 0;
+  margin-top: 9px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  grid-gap: 9px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  scrollbar-width: thin;
+}
+
+.move-ticker::-webkit-scrollbar {
+  height: 6px;
+}
+
+.move-ticker::-webkit-scrollbar-thumb {
+  background: rgb(0 0 0 / 22%);
+  border-radius: 3px;
+}
+
+.move-ticker::-webkit-scrollbar-track {
+  background: rgb(0 0 0 / 4%);
+  border-radius: 3px;
+}
+
+.move-ticker-item {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.move-ticker-item.red {
+  color: var(--red-dark);
+}
+
+.move-ticker-item.black {
+  color: var(--ink);
+}
+
+.move-ticker-item.latest {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f0ece2;
+  font-weight: 700;
+}
+
+.move-ticker-empty {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .clocks {
@@ -1150,7 +1239,7 @@ select:focus {
 .quick-chat {
   margin-top: 9px;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
   gap: 6px;
   grid-gap: 6px;
 }
@@ -1168,6 +1257,18 @@ select:focus {
 .quick-chat button:hover {
   border-color: #a99f90;
   color: var(--ink);
+}
+
+/* 「催一下」是动作而不是口头禅，给它一点强调色。 */
+.quick-chat button.nudge {
+  border-color: #ddc9a5;
+  background: #fdf5e8;
+  color: var(--amber);
+}
+
+.quick-chat button.nudge:hover {
+  border-color: var(--amber);
+  color: #8a5620;
 }
 
 .chat-form {
@@ -1305,6 +1406,28 @@ select:focus {
   font-size: 11px;
 }
 
+/* 对局中常驻显示房间码：中途再拉人进来时不用退出房间去看。 */
+.net-code-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  grid-gap: 8px;
+  flex-wrap: wrap;
+}
+
+.net-code-label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.net-code-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 16px;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+
 .net-actions {
   margin-top: 12px;
   display: flex;
@@ -1438,6 +1561,11 @@ select:focus {
     flex-direction: column;
   }
 
+  .topbar > * + * {
+    margin-left: 0;
+    margin-top: 12px;
+  }
+
   .topbar-controls {
     width: 100%;
     justify-content: flex-start;
@@ -1532,4 +1660,19 @@ select:focus {
   .result-banner span {
     animation: none;
   }
+}
+
+/* /ui 调试：给棋盘、棋子、落点画轮廓，方便核对命中区与层级。 */
+html.debug-ui .board {
+  outline: 2px dashed #c0392b;
+  outline-offset: 2px;
+}
+
+html.debug-ui .piece {
+  outline: 1px solid #2a7fd4;
+  outline-offset: 1px;
+}
+
+html.debug-ui .move-hints .hint {
+  outline: 1px solid #0a7a45;
 }
