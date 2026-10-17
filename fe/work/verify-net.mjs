@@ -890,7 +890,8 @@ try {
     status() { return { available: true, mode: "stub", phase: "idle" }; },
   };
 
-  const engine = loadEngine(APP_JS, undefined, {
+  // 用带内联音效的 www/ai-data.js，才能覆盖 /sound 与 /diag 里的音效信息。
+  const engine = loadEngine(APP_JS, path.join(here, "www", "ai-data.js"), {
     beforeEngine(sandbox) {
       sandbox.window.XiangqiNet = stubNet;
       sandbox.XiangqiNet = stubNet;
@@ -1096,6 +1097,56 @@ try {
   engine.runChatCommand("help");
   check("/help 只在本地输出、不发消息", sent.length === 0, JSON.stringify(sent));
   engine.state.net.cheatAutoStep = false;
+
+  // 调试命令：/fen /load /undo /perft /help /debug /sound /errors /dump
+  const chatNodes = () => engine.__document.getElementById("chatLog").children
+    .map((node) => node.children.map((child) => child.textContent).join(""))
+    .join("|");
+
+  engine.reset();
+  engine.runChatCommand("fen rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1");
+  check("/fen 按 FEN 摆好 32 个棋子",
+    engine.state.game.board.filter(Boolean).length === 32
+      && engine.state.game.sideToMove === RED,
+    JSON.stringify({
+      pieces: engine.state.game.board.filter(Boolean).length,
+      side: engine.state.game.sideToMove
+    }));
+
+  engine.runChatCommand("load h2e2 h9g7");
+  check("/load 按 ICCS 载入两手", engine.state.game.history.length === 2,
+    String(engine.state.game.history.length));
+
+  engine.runChatCommand("undo 1");
+  check("/undo 1 撤销一手", engine.state.game.history.length === 1,
+    String(engine.state.game.history.length));
+
+  engine.runChatCommand("perft 1");
+  check("/perft 输出 44", chatNodes().includes("perft 1: 44"), chatNodes().slice(-100));
+
+  engine.runChatCommand("help");
+  const helpText = chatNodes();
+  check("/help 按分组列出所有命令",
+    helpText.includes("【网络】") && helpText.includes("【引擎】")
+      && helpText.includes("【对局】") && helpText.includes("【诊断】")
+      && helpText.includes("/diag") && helpText.includes("/bench")
+      && helpText.includes("/fen"),
+    helpText.slice(-200));
+
+  engine.runChatCommand("debug on");
+  check("/debug on 打开详细日志", engine.state.debug === true);
+  engine.runChatCommand("debug off");
+  check("/debug off 关闭详细日志", engine.state.debug === false);
+
+  engine.runChatCommand("sound");
+  check("/sound 列出四个音效",
+    ["pickup", "place", "capture", "notify"].every((key) => chatNodes().includes(key + ":")),
+    chatNodes().slice(-160));
+
+  engine.runChatCommand("errors");
+  engine.runChatCommand("dump");
+  check("诊断类命令不抛异常", !chatNodes().includes("命令执行失败"),
+    chatNodes().slice(-160));
 } catch (error) {
   check("app protocol completed", false, String(error && error.stack || error));
 }

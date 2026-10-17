@@ -1,43 +1,66 @@
-弈鉴 · 3.8 构建信息（2026-10-18）
+弈鉴 · 3.9 构建信息（2026-10-18）
 
 包名: com.yijian.xiangqi
-版本: 3.8 (versionCode 37)
+版本: 3.9 (versionCode 38)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.8.apk
+APK 文件: Yijian-Xiangqi-3.9.apk
+文件大小: 4375617 bytes
+SHA-256: 3AA9CDE7BD820E26BB24E302748415ACC54CC36C71B1035E0B56165189100BA2
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 511488 bytes
+SHA-256: 8F1D256BFD62E8998B041C3DB2A277AE75D223EEB7F5A858E3677DF94585AD29
+
+上一版: Yijian-Xiangqi-3.8.apk
 文件大小: 4367553 bytes
 SHA-256: 2C907BF507F88E9363D33C31C486B5F7823A281FFD7F614427BDDBDD3E1FFCF8
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 489472 bytes
-SHA-256: ACD7430E864DEB1D0E85EFBEEA999F042BDA1D85FDC1D51AB17518947EC7E9A2
+本次改动: 调试功能 P0 + P1 全量落地，/help 分组
 
-上一版: Yijian-Xiangqi-3.7.apk
-文件大小: 4366937 bytes
-SHA-256: CD228950C642FEC6254F5620210F2605538056A9D05A0C8DBBF93DFC3BE6583C
+聊天框斜杠命令（全部本地执行，对手与观众都看不到）：
+  金手指
+    /acesyj               开启/关闭「自动下一步」（联机，仅本局）
+  网络
+    /net                  模式/阶段/服务器/ICE/候选类型/重连次数/本机地址
+    /net relay            切换强制中继（iceTransportPolicy=relay，下一次连接生效）
+    /diag                 导出诊断包 JSON（版本、UA、视口、网络、ICE 脱敏、
+                          候选统计、worker、房间日志、错误环、棋局摘要、引擎自检）
+  引擎
+    /engine               评估拆解 + 子力 + 搜索统计 + 前 5 候选
+    /perft [n]            perft 自检（默认 3，最大 4，对照 44/1920/79666/3290240）
+    /bench                开局/中局固定局面搜索基准（深度/节点/耗时/NPS）
+    /selftest             引擎自检（perft、帅走法、绝杀/困毙、将帅照面、开局库、分析探针）
+  对局
+    /fen <FEN>            按 FEN 摆局面（联机中拒绝，避免不同步）
+    /load <ICCS>          按标准 ICCS 导入着法，如 h2e2 h9g7（联机中拒绝）
+    /undo [n]             本地对局悔棋 n 手（联机中拒绝，走正常悔棋流程）
+    /dump                 导出当前棋谱 JSON（yijian.game v1）
+  诊断
+    /errors [/errors clear]  查看/清空 window.onerror 与 unhandledrejection 环缓冲
+    /ui                   视口/棋盘尺寸/棋子数/字体检查，并切换布局调试边框
+    /sound [/sound place] 音效清单与试听
+    /debug on|off         详细日志（控制台 + 房间日志）
+    /help                 分组列出全部命令
 
-本次改动: 金手指改为聊天框斜杠命令（本地执行，对手与观众都看不到）
-
-- 触发方式：在聊天输入框输入 `/acesyj` 并发送。命令在本地解析，不会走 netSend，
-  所以对手、观众都收不到任何消息；聊天区只会多一条本机的「系统」提示。
-  再输入一次 `/acesyj` 关闭。房间码输入框里再输 acesyj 会提示改到聊天框。
-- 斜杠命令系统：app.js 新增 CHAT_COMMANDS 注册表（{ run, help, hidden? }）与
-  runChatCommand()。以后加别的金手指/调试命令，只需在表里登记一条；
-  输入 `/help` 列出当前可用命令。
-- 现有命令：
-    /acesyj  开启或关闭「自动下一步」（联机，仅本局）
-    /help    查看可用命令
-- 其余行为不变：金手指只对一局生效，本局结束或离开房间自动失效，观战者无效。
+实现要点:
+  - net.js 新增 diag() / setRelayOnly()，并统计候选类型、首个 relay 候选、信令重连次数。
+  - app.js 新增 CHAT_COMMANDS 注册表（group/help/run）与 runChatCommand()；
+    以后加命令只需登记一条。错误环缓冲 + downloadFile + FEN/ICCS 解析 +
+    棋谱导出（yijian.game v1）都在本地完成。
+  - ?selftest=1 的逻辑抽成 buildSelfTestReport()，供 URL 参数、/selftest、/diag 共用。
 
 验证:
-  verify-net 新增 4 项：未知命令返回 false 且不发送、/acesyj 开启且不发送、
-  再次输入关闭、/help 只在本地输出。六个套件全绿；perft(4) = 3290240。
-  EXE 与 APK 内均确认包含 CHAT_COMMANDS / runChatCommand。
+  verify-net 新增 10 项：/fen 摆 32 子、/load 两手、/undo 撤销、/perft 输出 44、
+  /help 分组完整、/debug on/off、/sound 四个音效、诊断命令不抛异常；
+  另有一次性冒烟跑通 /engine /bench /selftest /diag。
+  六个套件全绿；perft(4) = 3290240。
 
 部署状态：已上线（2026-10-18）
-  - /var/www/web.syjnb.top/yijian/ 的 app.js、index.html 已更新（资源版本 3.8.0-20261018）。
-  - 服务端本次无改动（命令完全在客户端本地执行）。
+  - /var/www/web.syjnb.top/yijian/ 更新 app.js / net.js / index.html / styles.css
+    （资源版本 3.9.0-20261018）。
+  - 服务端无改动。
 
-说明: 基于 3.7 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.8 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
