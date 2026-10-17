@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.7.0-20261018";
+  const APP_ASSET_VERSION = "3.8.0-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2540,7 +2540,7 @@
       sentAt: 0,
       // 当前房间码（服务端分配，固定不变；对局中也常驻显示）
       roomCode: "",
-      // 金手指：房间码输入 acesyj 开启，允许联机时用「自动下一步」，仅本局有效。
+      // 金手指：聊天框输入斜杠命令开启，允许联机时用「自动下一步」，仅本局有效。
       cheatAutoStep: false
     }
   };
@@ -3809,11 +3809,53 @@
     });
   });
 
+  // 聊天框斜杠命令：只在本地执行，绝不会发给对手或观众。
+  // 以后要加别的金手指 / 调试功能，在 CHAT_COMMANDS 里登记一条即可。
+  const CHAT_COMMANDS = {
+    acesyj: {
+      run: netToggleCheat,
+      help: "/acesyj 开启或关闭「自动下一步」（联机，仅本局）"
+    },
+    help: {
+      run: showChatCommands,
+      help: "/help 查看可用命令"
+    }
+  };
+
+  function showChatCommands() {
+    const lines = Object.keys(CHAT_COMMANDS)
+      .filter((name) => !CHAT_COMMANDS[name].hidden)
+      .map((name) => CHAT_COMMANDS[name].help);
+    appendChat("系统", lines.join("；"), false);
+  }
+
+  function runChatCommand(raw) {
+    const line = String(raw || "").trim();
+    const name = line.split(/\s+/)[0].toLowerCase();
+    if (!name) return false;
+    const command = CHAT_COMMANDS[name];
+    if (!command) {
+      appendChat("系统", `未知命令 /${name}，输入 /help 查看可用命令`, false);
+      return false;
+    }
+    try {
+      command.run(line.slice(name.length).trim());
+    } catch (error) {
+      appendChat("系统", "命令执行失败：" + defaultTo(error && error.message, "unknown"), false);
+    }
+    return true;
+  }
+
   elements.chatForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const text = elements.chatInput.value.trim();
     if (!text) return;
     elements.chatInput.value = "";
+    // 斜杠命令只在本地执行：不显示成"你说"，也不发给对手/观众。
+    if (text.charAt(0) === "/") {
+      runChatCommand(text.slice(1));
+      return;
+    }
     appendChat("你", text, true);
     if (netActive()) netSend({ t: "chat", text });
     else respondToChat(text);
@@ -4359,12 +4401,11 @@
     return answer === null ? null : String(answer).trim();
   }
 
-  // 金手指：在房间码里输入 acesyj 切换。开启后本局允许用「自动下一步」，
+  // 金手指：聊天框输入 /acesyj 切换。开启后本局允许用「自动下一步」，
   // 本局结束（markMoveTiming 检测到结果）或离开房间时自动失效。
   function netToggleCheat() {
     state.net.cheatAutoStep = !state.net.cheatAutoStep;
     if (state.net.cheatAutoStep) {
-      if (elements.netRoomCode) elements.netRoomCode.value = "";
       netLog("金手指已开启：「自动下一步」本局可用（仅生效一局）");
       appendChat("系统", "金手指已开启：本局可用「自动下一步」", false);
     } else {
@@ -4408,9 +4449,9 @@
       codeOverride || (elements.netRoomCode && elements.netRoomCode.value),
       ""
     ).trim().toUpperCase();
-    // 金手指：这不是房间码，而是开关「本局可用自动下一步」的暗号。
+    // 金手指已经改到聊天框（/acesyj）；这里只给还在旧位置输入的玩家一个提示。
     if (code === "ACESYJ") {
-      netToggleCheat();
+      netLog("金手指已改为在聊天框输入 /acesyj");
       return;
     }
     // The relay always hands out exactly six characters; anything else is a
@@ -4829,6 +4870,7 @@
     netHandleMessage,
     netBegin,
     netToggleCheat,
+    runChatCommand,
     netApplyMove,
     netSend,
     netLeave,
