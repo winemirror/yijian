@@ -1016,6 +1016,19 @@ try {
   check("auto next step comes back after leaving the room",
     engine.__document.getElementById("autoStep").disabled === false,
     String(engine.__document.getElementById("autoStep").disabled));
+
+  // 金手指：房间码输入 acesyj 后，联机也允许「自动下一步」，且只对本局有效。
+  engine.netToggleCheat();
+  check("金手指可以切到开启", engine.state.net.cheatAutoStep === true);
+  engine.netBegin("guest", RED, "乙");
+  check("金手指开启后联机也能用自动下一步",
+    engine.__document.getElementById("autoStep").disabled === false,
+    String(engine.__document.getElementById("autoStep").disabled));
+  engine.state.game.result = { type: "win", winner: RED, reason: "绝杀" };
+  engine.markMoveTiming(null);
+  check("本局结束后金手指自动失效", engine.state.net.cheatAutoStep === false);
+  engine.netLeave();
+  check("离开房间也会清掉金手指", engine.state.net.cheatAutoStep === false);
 } catch (error) {
   check("app protocol completed", false, String(error && error.stack || error));
 }
