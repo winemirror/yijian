@@ -39,7 +39,7 @@ node server.mjs
 ```
 { t:"hello",       proto:1, name }
 { t:"ice" }                                    // 需要时重新取 ICE 配置
-{ t:"room.create", name, visibility:"public"|"private", password? }
+{ t:"room.create", name, visibility:"public"|"private", password?, preferredId? }
 { t:"room.list" }
 { t:"room.join",   roomId, want:"play"|"spectate", password? }
 { t:"room.leave" }
@@ -63,6 +63,8 @@ node server.mjs
 规则：
 
 - 房间码 6 位，字符集 `23456789ABCDEFGHJKMNPQRSTUVWXYZ`（去掉 0/O/1/I/L）。
+- `room.create` 可以带 `preferredId`：格式合法且当前空闲时直接采用，
+  否则退回随机生成。客户端用它让同一主机默认复用固定房间码。
 - 房间可以带密码：`room.create` 传 `password` 即为上锁房间，服务端只存
   `sha256("<房间码>\n<密码>")`（房间码当盐，不存明文）；`room.join` 密码不对回
   `error code=bad_password`。`room.list` 用 `locked` 标记上锁房间（不下发任何密码信息）。

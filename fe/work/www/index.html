@@ -88,7 +88,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=3.6.0-20261018">
+  <link rel="stylesheet" href="styles.css?v=3.7.0-20261018">
 </head>
 <body>
   <noscript>
@@ -400,6 +400,11 @@
           <div id="netActive" hidden>
             <div class="net-status">
               <div id="netStatusText" class="net-status-text">未联机</div>
+              <div id="netCodeRow" class="net-code-row" hidden>
+                <span class="net-code-label">房间码</span>
+                <strong id="netActiveCode" class="net-code-value">------</strong>
+                <button id="netCopyCode" class="btn small" type="button" title="复制房间码">复制</button>
+              </div>
               <div id="netDetail" class="net-detail"></div>
             </div>
             <div class="net-actions">
@@ -416,8 +421,8 @@
     </main>
   </div>
 
-  <script src="ai-data.js?v=3.6.0-20261018"></script>
-  <script src="net.js?v=3.6.0-20261018"></script>
-  <script src="app.js?v=3.6.0-20261018"></script>
+  <script src="ai-data.js?v=3.7.0-20261018"></script>
+  <script src="net.js?v=3.7.0-20261018"></script>
+  <script src="app.js?v=3.7.0-20261018"></script>
 </body>
 </html>
