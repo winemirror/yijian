@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.5.0-20261016";
+  const APP_ASSET_VERSION = "3.6.0-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2534,7 +2534,9 @@
       mode: null,
       available: false,
       pendingUndo: false,
-      sentAt: 0
+      sentAt: 0,
+      // 金手指：房间码输入 acesyj 开启，允许联机时用「自动下一步」，仅本局有效。
+      cheatAutoStep: false
     }
   };
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -2742,7 +2744,14 @@
     const now = Date.now();
     if (record) record.moveTimeMs = Math.max(0, now - (state.turnStartedAt || now));
     state.turnStartedAt = now;
-    if (state.game.result.type !== "ongoing") state.endedAt = now;
+    if (state.game.result.type !== "ongoing") {
+      state.endedAt = now;
+      // 金手指只对一局生效：本局一结束就收回去。
+      if (state.net.cheatAutoStep) {
+        state.net.cheatAutoStep = false;
+        if (state.net.inRoom) netLog("金手指已失效（本局结束）");
+      }
+    }
   }
 
   // --- Sound -----------------------------------------------------------------
@@ -3455,13 +3464,13 @@
   }
 
   function updateAutoStepButton() {
+    const netGame = netActive();
+    const cheat = netGame && state.net.cheatAutoStep;
     const usable = state.live
       && !state.busy
       && state.game.result.type === "ongoing"
-      // Disabled in a net game: letting the engine pick your move would play
-      // the game for you.
-      && !netActive()
-      && canPlayNow();
+      // 联机默认禁用（让引擎替你走子等于代打）；只有金手指开启时放行。
+      && (cheat ? canMoveLocally() : (!netGame && canPlayNow()));
     elements.autoStep.disabled = !usable;
   }
 
@@ -3529,7 +3538,7 @@
   // is on the move, using that side's remembered AI strength.
   async function playAutoStep() {
     if (state.busy || !state.live || state.game.result.type !== "ongoing") return;
-    if (netActive()) {
+    if (netActive() && !state.net.cheatAutoStep) {
       setStatus("联机对局不使用自动下一步");
       return;
     }
@@ -3540,10 +3549,12 @@
       return;
     }
     allowAnimation = !prefersReducedMotion;
-    await playAIMoveOnce({
+    const record = await playAIMoveOnce({
       pauseBefore: 0,
       levels: { before: ANALYSIS_LEVEL, after: CURRENT_ANALYSIS_LEVEL }
     });
+    // 联机时这步算"我"走的，必须像手动走子一样同步给对手。
+    if (netActive() && record) netSendMove(record);
     await runAIDriver({ reply: true });
   }
 
@@ -4318,6 +4329,21 @@
     return answer === null ? null : String(answer).trim();
   }
 
+  // 金手指：在房间码里输入 acesyj 切换。开启后本局允许用「自动下一步」，
+  // 本局结束（markMoveTiming 检测到结果）或离开房间时自动失效。
+  function netToggleCheat() {
+    state.net.cheatAutoStep = !state.net.cheatAutoStep;
+    if (state.net.cheatAutoStep) {
+      if (elements.netRoomCode) elements.netRoomCode.value = "";
+      netLog("金手指已开启：「自动下一步」本局可用（仅生效一局）");
+      appendChat("系统", "金手指已开启：本局可用「自动下一步」", false);
+    } else {
+      netLog("金手指已关闭");
+      appendChat("系统", "金手指已关闭", false);
+    }
+    updateAutoStepButton();
+  }
+
   async function netJoinByCode(want, codeOverride) {
     if (!Net || typeof Net.joinByCode !== "function") return;
     if (state.net.inRoom) return;
@@ -4325,6 +4351,11 @@
       codeOverride || (elements.netRoomCode && elements.netRoomCode.value),
       ""
     ).trim().toUpperCase();
+    // 金手指：这不是房间码，而是开关「本局可用自动下一步」的暗号。
+    if (code === "ACESYJ") {
+      netToggleCheat();
+      return;
+    }
     // The relay always hands out exactly six characters; anything else is a
     // typo and would just round-trip to a "房间不存在" from the server.
     if (code.length !== 6) {
@@ -4555,6 +4586,7 @@
     state.net.peerName = "";
     state.net.phase = "idle";
     state.net.pendingUndo = false;
+    state.net.cheatAutoStep = false;
     // Refresh the buttons: "auto next step" comes back once the room is gone.
     render();
     netRender();
@@ -4728,6 +4760,7 @@
     netActive,
     netHandleMessage,
     netBegin,
+    netToggleCheat,
     netApplyMove,
     netSend,
     netLeave,
