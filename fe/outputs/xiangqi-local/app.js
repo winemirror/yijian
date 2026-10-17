@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.8.0-20261018";
+  const APP_ASSET_VERSION = "3.9.0-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2519,6 +2519,7 @@
     turnStartedAt: 0,
     endedAt: 0,
     soundOn: true,
+    debug: false,
     session: 0,
     // LAN multiplayer. Inactive until a room is joined or hosted, so the
     // single-player paths below stay exactly as they were.
@@ -3809,39 +3810,602 @@
     });
   });
 
-  // 聊天框斜杠命令：只在本地执行，绝不会发给对手或观众。
-  // 以后要加别的金手指 / 调试功能，在 CHAT_COMMANDS 里登记一条即可。
+  // ------------------------------------------------------------ 聊天调试命令
+  // 全部只在本地执行，绝不会发给对手或观众。要加新的金手指/调试功能，
+  // 在 CHAT_COMMANDS 里登记一条 { group, help, run } 即可。
+  function sysLine(text) {
+    appendChat("系统", String(text), false);
+  }
+
+  function sysLines(lines) {
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index] !== undefined && lines[index] !== null) sysLine(lines[index]);
+    }
+  }
+
+  function debugLog(text) {
+    if (!state.debug) return;
+    netLog("[debug] " + text);
+    if (typeof console !== "undefined" && console.log) console.log("[yijian]", text);
+  }
+
+  // 错误环缓冲：window.onerror / unhandledrejection 都记下来，供 /errors 与 /diag。
+  const errorRing = [];
+  function recordError(kind, detail) {
+    const text = detail && (detail.stack || detail.message)
+      ? (detail.stack || detail.message)
+      : String(detail);
+    errorRing.push({
+      at: new Date().toISOString(),
+      kind: kind,
+      detail: String(text).slice(0, 800)
+    });
+    if (errorRing.length > 50) errorRing.shift();
+  }
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("error", (event) => recordError("error", event.error || event.message));
+    window.addEventListener("unhandledrejection", (event) => recordError("rejection", event.reason));
+  }
+
+  function timeSlug() {
+    return new Date().toISOString().replace(/[:.]/g, "-").replace("T", "-").slice(0, 19);
+  }
+
+  function downloadFile(filename, text, mime) {
+    try {
+      if (typeof Blob !== "function" || typeof URL === "undefined" || !URL.createObjectURL) {
+        sysLine("当前环境不支持下载文件");
+        return false;
+      }
+      const blob = new Blob([text], { type: mime || "application/json;charset=utf-8" });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = filename;
+      document.body.appendChild(link);
+      if (typeof link.click === "function") link.click();
+      setTimeout(() => {
+        try { document.body.removeChild(link); } catch (error) { /* gone */ }
+        URL.revokeObjectURL(href);
+      }, 0);
+      return true;
+    } catch (error) {
+      sysLine("下载失败：" + defaultTo(error && error.message, "unknown"));
+      return false;
+    }
+  }
+
+  function parseXiangqiFen(fen) {
+    const parts = String(fen || "").trim().split(/\s+/);
+    if (!parts[0]) throw new Error("缺少 FEN 局面");
+    const rows = parts[0].split("/");
+    if (rows.length !== 10) throw new Error("FEN 必须有 10 行");
+    const board = new Array(90).fill(null);
+    for (let row = 0; row < 10; row += 1) {
+      let col = 0;
+      for (const ch of rows[row]) {
+        if (/[1-9]/.test(ch)) {
+          col += Number(ch);
+          continue;
+        }
+        const type = ch.toLowerCase();
+        if (!PIECE_NAMES[type]) throw new Error("不认识的棋子：" + ch);
+        if (col > 8) throw new Error(`第 ${row + 1} 行超过 9 列`);
+        board[row * 9 + col] = { type, side: ch === ch.toUpperCase() ? RED : BLACK };
+        col += 1;
+      }
+      if (col !== 9) throw new Error(`第 ${row + 1} 行不是 9 列`);
+    }
+    const side = /^b$/i.test(parts[1] || "") ? BLACK : RED;
+    return { board, side };
+  }
+
+  function parseIccsMoves(text) {
+    const tokens = String(text || "").trim().split(/[\s,]+/).filter(Boolean);
+    return tokens.map((token) => {
+      const clean = token.replace(/-/g, "").toLowerCase();
+      // 标准 ICCS：a-i 为文件，0-9 为横线（0 = 红方底线）。
+      const match = /^([a-i])([0-9])([a-i])([0-9])$/.exec(clean);
+      if (!match) throw new Error("看不懂的着法：" + token);
+      return {
+        from: (9 - Number(match[2])) * 9 + FILES.indexOf(match[1]),
+        to: (9 - Number(match[4])) * 9 + FILES.indexOf(match[3])
+      };
+    });
+  }
+
+  function applyDebugGame(game, label) {
+    state.session += 1;
+    aiDriverToken += 1;
+    state.game = game;
+    state.selected = null;
+    state.legalMoves = [];
+    state.live = true;
+    state.reviewPly = game.history.length;
+    state.displayAnalysis = null;
+    state.busy = false;
+    state.playing = false;
+    state.startedAt = Date.now();
+    state.turnStartedAt = state.startedAt;
+    state.endedAt = 0;
+    renderThinking();
+    render();
+    updatePlayButton();
+    sysLine(label);
+  }
+
+  function materialUnits(counts) {
+    let sum = 0;
+    Object.keys(counts || {}).forEach((type) => {
+      if (type === "k") return;
+      sum += (counts[type] || 0) * (PIECE_VALUES[type] || 0);
+    });
+    return sum;
+  }
+
+  function debugNet(arg) {
+    if (!Net || typeof Net.diag !== "function") {
+      sysLine("当前环境没有联机层");
+      return;
+    }
+    const sub = String(arg || "").trim().toLowerCase();
+    if (sub === "relay") {
+      const now = !Net.diag().relayOnly;
+      Net.setRelayOnly(now);
+      sysLine(`强制中继已${now ? "开启" : "关闭"}（对下一次连接生效）`);
+    }
+    const net = Net.status ? Net.status() : {};
+    const diag = Net.diag();
+    const iceText = (diag.ice || []).map((entry) => (
+      Array.isArray(entry.urls) ? entry.urls.join(" + ") : String(entry.urls || "")
+    )).join("；");
+    const hasCredential = (diag.ice || []).some((entry) => entry.hasCredential);
+    sysLines([
+      `模式 ${net.mode || "-"} / 阶段 ${net.phase || "-"} / 方式 ${net.prefer || "-"}`,
+      `服务器 ${net.serverUrl || "-"}`,
+      `ICE ${iceText || "无"}（TURN ${diag.turn} 条${hasCredential ? "，带临时凭证" : ""}）`,
+      `候选 host ${diag.candidates.host} / srflx ${diag.candidates.srflx} / relay ${diag.candidates.relay}`,
+      `中继候选 ${diag.relay ? "已获得" : "无"}；重连 ${diag.reconnects} 次；强制中继 ${diag.relayOnly ? "开" : "关"}`,
+      `本机地址 ${(diag.localIps || []).join(" / ") || "-"}`
+    ]);
+  }
+
+  function compactGame() {
+    return {
+      result: Object.assign({}, state.game.result),
+      halfmoveClock: state.game.halfmoveClock,
+      sideToMove: state.game.sideToMove,
+      moves: state.game.history.map((record) => ({
+        i: record.index,
+        from: record.from,
+        to: record.to,
+        side: record.side,
+        notation: record.notation,
+        ms: record.moveTimeMs || 0,
+        quality: record.quality ? record.quality.label : "",
+        winRed: typeof record.winRedAfter === "number" ? record.winRedAfter : null
+      }))
+    };
+  }
+
+  function buildDiagnostics() {
+    const netStatus = Net && Net.status ? Net.status() : null;
+    const netDiag = Net && Net.diag ? Net.diag() : null;
+    return {
+      generatedAt: new Date().toISOString(),
+      app: {
+        assetVersion: APP_ASSET_VERSION,
+        url: (typeof location !== "undefined" ? location.href.split("?")[0] : ""),
+        ua: (typeof navigator !== "undefined" ? navigator.userAgent : ""),
+        dpr: (typeof window !== "undefined" ? window.devicePixelRatio : 0),
+        viewport: (typeof window !== "undefined"
+          ? { w: window.innerWidth, h: window.innerHeight }
+          : null),
+        reducedMotion: prefersReducedMotion
+      },
+      net: netStatus ? {
+        mode: netStatus.mode,
+        phase: netStatus.phase,
+        prefer: netStatus.prefer,
+        serverUrl: netStatus.serverUrl,
+        turn: netStatus.turn,
+        peers: netStatus.peers,
+        localIps: netStatus.localIps
+      } : null,
+      netDiag: netDiag,
+      workers: {
+        count: document.documentElement.dataset.workerCount || "0",
+        backend: document.documentElement.dataset.workerBackend || "",
+        error: document.documentElement.dataset.workerError || ""
+      },
+      roomLog: (elements.netLog ? elements.netLog.textContent : "").split("\n").slice(-200),
+      errors: errorRing.slice(),
+      game: compactGame(),
+      selftest: buildSelfTestReport()
+    };
+  }
+
+  function debugDiag() {
+    const bundle = buildDiagnostics();
+    const text = JSON.stringify(bundle, null, 2);
+    if (!downloadFile(`yijian-diag-${timeSlug()}.json`, text)) return;
+    sysLine(`诊断包已导出（${Math.max(1, Math.round(text.length / 1024))} KB）`);
+  }
+
+  function debugEngine() {
+    const board = cloneBoard(state.game.board);
+    const side = state.game.sideToMove;
+    const counts = countMaterial(board);
+    const score = evaluateBoard(board, side);
+    const analysis = analyzePosition(board, side, {
+      depth: 4,
+      timeMs: 700,
+      nodeLimit: 120000,
+      candidates: 5,
+      nullMove: true,
+      pvs: true,
+      checkExtension: true,
+      lmr: true
+    });
+    const lines = [
+      `评估 ${score}（${side === RED ? "红" : "黑"}方视角）`,
+      `子力 红 ${materialUnits(counts[RED])} / 黑 ${materialUnits(counts[BLACK])}`,
+      `搜索 深度 ${analysis.depth}，节点 ${analysis.nodes}，${analysis.elapsed}ms`,
+      `首选 ${analysis.bestNotation || "-"}，评分 ${analysis.score}，红方赢面 ${analysis.winRed.toFixed(1)}%`
+    ];
+    (analysis.moveScores || []).slice(0, 5).forEach((entry, index) => {
+      lines.push(`${index + 1}. ${moveToNotation(board, entry.move)}  评分 ${entry.score}  赢面 ${entry.winRed.toFixed(1)}%`);
+    });
+    sysLines(lines);
+  }
+
+  function debugPerft(arg) {
+    const max = Math.max(1, Math.min(4, Number(arg) || 3));
+    const expected = [44, 1920, 79666, 3290240];
+    const lines = [];
+    for (let depth = 1; depth <= max; depth += 1) {
+      const started = performance.now();
+      const nodes = perft(cloneBoard(INITIAL_POSITION), RED, depth);
+      const ms = Math.max(1, performance.now() - started);
+      const ok = nodes === expected[depth - 1];
+      lines.push(`perft ${depth}: ${nodes}（期望 ${expected[depth - 1]}）${ok ? "OK" : "MISMATCH"} ${ms.toFixed(0)}ms ${Math.round(nodes / (ms / 1000))} nps`);
+    }
+    sysLines(lines);
+  }
+
+  function benchProbe(label, game, side) {
+    const analysis = analyzePosition(cloneBoard(game.board), side, {
+      depth: 4,
+      timeMs: 600,
+      nodeLimit: 150000,
+      candidates: 3,
+      nullMove: true,
+      pvs: true,
+      checkExtension: true,
+      lmr: true
+    });
+    const ms = Math.max(1, analysis.elapsed);
+    return `${label}: 深度 ${analysis.depth}，${analysis.nodes} 节点，${ms}ms，${Math.round(analysis.nodes / (ms / 1000))} nps，首选 ${analysis.bestNotation || "-"}`;
+  }
+
+  function debugBench() {
+    const lines = [];
+    lines.push(benchProbe("开局", new XiangqiGame(), RED));
+    const mid = new XiangqiGame();
+    [[60, 51], [1, 20], [70, 67], [25, 24], [67, 31]].forEach(([from, to]) => mid.play(from, to));
+    lines.push(benchProbe("中局", mid, BLACK));
+    sysLines(lines);
+  }
+
+  function debugSelfTest() {
+    const report = buildSelfTestReport();
+    sysLines([
+      `perft ${report.d1} / ${report.d2} / ${report.d3}`,
+      `帅的合法走法 ${report.kingMoves}；绝杀 ${report.mate.legalMoves} 手（被将 ${report.mate.inCheck}）`,
+      `困毙 ${report.stalemate.legalMoves} 手（被将 ${report.stalemate.inCheck}）`,
+      `将帅照面时车的走法 ${report.flyingGeneral.rookMoves}`,
+      `开局库 ${report.openingBook.positions} 个局面 / ${report.openingBook.lines} 条线路，高级首选 ${report.openingBook.masterFirstMove || "-"}`,
+      `分析探针 ${report.analysisProbe.best}，红方赢面 ${Number(report.analysisProbe.rate).toFixed(1)}%`
+    ]);
+  }
+
+  function debugFen(arg) {
+    if (netActive()) {
+      sysLine("联机中不能摆局面（会与对手不同步）");
+      return;
+    }
+    const fen = String(arg || "").trim();
+    if (!fen) {
+      sysLine("用法：/fen <FEN>，例如 rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1");
+      return;
+    }
+    try {
+      const parsed = parseXiangqiFen(fen);
+      const game = new XiangqiGame();
+      game.board = cloneBoard(parsed.board);
+      game.sideToMove = parsed.side;
+      game.history = [];
+      game.positionCounts = Object.create(null);
+      game.positionCounts[stateKey(parsed.board, parsed.side)] = 1;
+      game.halfmoveClock = 0;
+      game.result = { type: "ongoing", winner: null, reason: "" };
+      applyDebugGame(game, `已载入 FEN（${parsed.side === RED ? "红" : "黑"}方行棋）`);
+    } catch (error) {
+      sysLine("FEN 解析失败：" + defaultTo(error && error.message, "unknown"));
+    }
+  }
+
+  function debugLoad(arg) {
+    if (netActive()) {
+      sysLine("联机中不能载入着法（会与对手不同步）");
+      return;
+    }
+    const text = String(arg || "").trim();
+    if (!text) {
+      sysLine("用法：/load h2e2 h9g7 ...（ICCS 坐标，空格或逗号分隔）");
+      return;
+    }
+    try {
+      const moves = parseIccsMoves(text);
+      const game = new XiangqiGame();
+      for (let index = 0; index < moves.length; index += 1) {
+        try {
+          game.play(moves[index].from, moves[index].to);
+        } catch (error) {
+          throw new Error(`第 ${index + 1} 手不合法（${defaultTo(error && error.message, "unknown")}）`);
+        }
+      }
+      applyDebugGame(game, `已载入 ${moves.length} 手（${game.result.type === "ongoing" ? "未分胜负" : "已结束"}）`);
+    } catch (error) {
+      sysLine("载入失败：" + defaultTo(error && error.message, "unknown"));
+    }
+  }
+
+  function debugUndo(arg) {
+    if (netActive()) {
+      sysLine("联机中请用「悔棋」按钮走双方同意流程");
+      return;
+    }
+    const total = state.game.history.length;
+    if (!total) {
+      sysLine("还没有可悔的棋");
+      return;
+    }
+    const count = Math.max(1, Math.min(20, Number(arg) || 1));
+    state.game.undo(count);
+    state.reviewPly = state.game.history.length;
+    state.live = true;
+    state.selected = null;
+    state.legalMoves = [];
+    state.displayAnalysis = null;
+    render();
+    sysLine(`已悔棋 ${Math.min(count, total)} 手`);
+  }
+
+  function buildGameExport() {
+    const now = new Date().toISOString();
+    const nameOf = (side) => {
+      if (netActive()) {
+        return side === state.net.mySide ? netPlayerName : (state.net.peerName || "对手");
+      }
+      if (state.control[side] === "human") return "我";
+      const level = AI_LEVELS[state.levels[side]];
+      return "AI · " + (level ? level.label : state.levels[side]);
+    };
+    return {
+      format: "yijian.game",
+      version: 1,
+      id: "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      createdAt: new Date(state.startedAt || Date.now()).toISOString(),
+      endedAt: state.game.result.type === "ongoing" ? null : now,
+      mode: netActive() ? "online" : "local",
+      red: { name: nameOf(RED) },
+      black: { name: nameOf(BLACK) },
+      result: Object.assign({}, state.game.result),
+      moves: state.game.history.map((record) => ({
+        i: record.index,
+        from: record.from,
+        to: record.to,
+        side: record.side,
+        notation: record.notation,
+        ms: record.moveTimeMs || 0,
+        quality: record.quality ? record.quality.label : "",
+        winRed: typeof record.winRedAfter === "number" ? record.winRedAfter : null
+      })),
+      meta: { app: APP_ASSET_VERSION, engine: "yijian" }
+    };
+  }
+
+  function debugDump() {
+    const record = buildGameExport();
+    const text = JSON.stringify(record, null, 2);
+    if (!downloadFile(`yijian-game-${timeSlug()}.json`, text)) return;
+    sysLine(`棋谱已导出（${record.moves.length} 手）`);
+  }
+
+  function debugErrors(arg) {
+    if (String(arg || "").trim().toLowerCase() === "clear") {
+      errorRing.length = 0;
+      sysLine("错误记录已清空");
+      return;
+    }
+    if (!errorRing.length) {
+      sysLine("没有记录到错误");
+      return;
+    }
+    sysLines(errorRing.slice(-20).map((entry) => (
+      `[${entry.at.slice(11, 19)}] ${entry.kind}: ${entry.detail.slice(0, 160)}`
+    )));
+  }
+
+  function debugUi() {
+    const board = elements.board && typeof elements.board.getBoundingClientRect === "function"
+      ? elements.board.getBoundingClientRect()
+      : null;
+    const fontsReady = !!(document.fonts && typeof document.fonts.check === "function");
+    const fontOk = fontsReady ? document.fonts.check('16px "Xiangqi Li"') : false;
+    document.documentElement.classList.toggle("debug-ui");
+    const on = document.documentElement.classList.contains("debug-ui");
+    sysLines([
+      `视口 ${window.innerWidth}×${window.innerHeight} @${window.devicePixelRatio || 1}x`,
+      `棋盘 ${board ? Math.round(board.width) + "×" + Math.round(board.height) : "-"}，棋子 ${elements.pieces ? elements.pieces.children.length : 0} 个`,
+      `字体检查 ${fontsReady ? (fontOk ? "OK" : "未命中") : "不支持 document.fonts"}`,
+      `布局边框已${on ? "开启" : "关闭"}`
+    ]);
+  }
+
+  function debugSound(arg) {
+    const sources = (GLOBAL_SCOPE.XiangqiAiData && GLOBAL_SCOPE.XiangqiAiData.sounds) || {};
+    const keys = Object.keys(sources);
+    const pick = String(arg || "").trim();
+    if (pick) {
+      if (!sources[pick]) {
+        sysLine("没有这个音效：" + pick + "（可用：" + keys.join(" / ") + "）");
+        return;
+      }
+      state.soundOn = true;
+      updateSoundButton();
+      playSound(pick);
+      sysLine("播放 " + pick);
+      return;
+    }
+    sysLines([
+      `音效 ${state.soundOn ? "开" : "关"}，音量 ${SOUND_VOLUME}`,
+      ...keys.map((key) => `${key}: 约 ${Math.round((sources[key].length * 3) / 4 / 1024)} KB`)
+    ]);
+  }
+
+  function debugSetLog(arg) {
+    const value = String(arg || "").trim().toLowerCase();
+    state.debug = value === ""
+      ? !state.debug
+      : (value === "on" || value === "1" || value === "true");
+    sysLine("详细日志已" + (state.debug ? "开启" : "关闭"));
+    if (state.debug) netLog("[debug] 详细日志开启");
+  }
+
   const CHAT_COMMANDS = {
     acesyj: {
+      group: "金手指",
       run: netToggleCheat,
       help: "/acesyj 开启或关闭「自动下一步」（联机，仅本局）"
     },
+    net: {
+      group: "网络",
+      run: debugNet,
+      help: "/net 查看连接/候选；/net relay 切换强制中继"
+    },
+    diag: {
+      group: "网络",
+      run: debugDiag,
+      help: "/diag 导出诊断包（JSON）"
+    },
+    engine: {
+      group: "引擎",
+      run: debugEngine,
+      help: "/engine 评估拆解 + 搜索统计 + 前 5 候选"
+    },
+    perft: {
+      group: "引擎",
+      run: debugPerft,
+      help: "/perft [n] 走子生成自检（默认 3，最大 4）"
+    },
+    bench: {
+      group: "引擎",
+      run: debugBench,
+      help: "/bench 固定局面搜索基准"
+    },
+    selftest: {
+      group: "引擎",
+      run: debugSelfTest,
+      help: "/selftest 运行引擎自检"
+    },
+    fen: {
+      group: "对局",
+      run: debugFen,
+      help: "/fen <FEN> 摆一个局面"
+    },
+    load: {
+      group: "对局",
+      run: debugLoad,
+      help: "/load <ICCS> 导入着法，如 h2e2 h9g7"
+    },
+    undo: {
+      group: "对局",
+      run: debugUndo,
+      help: "/undo [n] 悔棋 n 手（仅本地对局）"
+    },
+    dump: {
+      group: "对局",
+      run: debugDump,
+      help: "/dump 导出当前棋谱 JSON"
+    },
+    errors: {
+      group: "诊断",
+      run: debugErrors,
+      help: "/errors 查看错误记录（/errors clear 清空）"
+    },
+    ui: {
+      group: "诊断",
+      run: debugUi,
+      help: "/ui 界面信息并切换布局边框"
+    },
+    sound: {
+      group: "诊断",
+      run: debugSound,
+      help: "/sound 音效清单（/sound place 试听）"
+    },
+    debug: {
+      group: "诊断",
+      run: debugSetLog,
+      help: "/debug on|off 详细日志"
+    },
     help: {
+      group: "帮助",
       run: showChatCommands,
-      help: "/help 查看可用命令"
+      help: "/help 查看本列表"
     }
   };
 
   function showChatCommands() {
-    const lines = Object.keys(CHAT_COMMANDS)
-      .filter((name) => !CHAT_COMMANDS[name].hidden)
-      .map((name) => CHAT_COMMANDS[name].help);
-    appendChat("系统", lines.join("；"), false);
+    const order = ["金手指", "网络", "引擎", "对局", "诊断", "帮助"];
+    const groups = Object.create(null);
+    Object.keys(CHAT_COMMANDS).forEach((name) => {
+      const entry = CHAT_COMMANDS[name];
+      if (entry.hidden) return;
+      const group = entry.group || "其他";
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(entry.help);
+    });
+    const lines = [];
+    order.forEach((group) => {
+      if (!groups[group]) return;
+      lines.push(`【${group}】`);
+      lines.push(...groups[group]);
+    });
+    Object.keys(groups).forEach((group) => {
+      if (order.indexOf(group) >= 0) return;
+      lines.push(`【${group}】`);
+      lines.push(...groups[group]);
+    });
+    sysLines(lines);
   }
 
   function runChatCommand(raw) {
     const line = String(raw || "").trim();
     const name = line.split(/\s+/)[0].toLowerCase();
     if (!name) return false;
+    debugLog("命令 /" + name);
     const command = CHAT_COMMANDS[name];
     if (!command) {
-      appendChat("系统", `未知命令 /${name}，输入 /help 查看可用命令`, false);
+      sysLine(`未知命令 /${name}，输入 /help 查看可用命令`);
       return false;
     }
     try {
       command.run(line.slice(name.length).trim());
     } catch (error) {
-      appendChat("系统", "命令执行失败：" + defaultTo(error && error.message, "unknown"), false);
+      recordError("command", error);
+      sysLine("命令执行失败：" + defaultTo(error && error.message, "unknown"));
     }
     return true;
   }
@@ -4879,7 +5443,8 @@
   };
 
   document.documentElement.dataset.engineReady = "true";
-  if (new URLSearchParams(window.location.search).has("selftest")) {
+  // 引擎自检：既供 ?selftest=1 使用，也供聊天命令 /selftest 与 /diag 复用。
+  function buildSelfTestReport() {
     const palaceBoard = Array(90).fill(null);
     palaceBoard[85] = { type: "k", side: RED };
     palaceBoard[4] = { type: "k", side: BLACK };
@@ -4991,7 +5556,7 @@
       return qualityForRecord({ from: 2, to: 3, side: BLACK }, analysis).label;
     });
 
-    document.documentElement.dataset.selftest = JSON.stringify({
+    return {
       d1: perft(cloneBoard(INITIAL_POSITION), RED, 1),
       d2: perft(cloneBoard(INITIAL_POSITION), RED, 2),
       d3: perft(cloneBoard(INITIAL_POSITION), RED, 3),
@@ -5056,7 +5621,11 @@
       },
       ratingLevels,
       ratingLevelsBlack
-    });
+    };
+  }
+
+  if (new URLSearchParams(window.location.search).has("selftest")) {
+    document.documentElement.dataset.selftest = JSON.stringify(buildSelfTestReport());
   }
 
   readSetupFromControls();

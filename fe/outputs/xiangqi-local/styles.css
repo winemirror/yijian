@@ -1567,3 +1567,18 @@ select:focus {
     animation: none;
   }
 }
+
+/* /ui 调试：给棋盘、棋子、落点画轮廓，方便核对命中区与层级。 */
+html.debug-ui .board {
+  outline: 2px dashed #c0392b;
+  outline-offset: 2px;
+}
+
+html.debug-ui .piece {
+  outline: 1px solid #2a7fd4;
+  outline-offset: 1px;
+}
+
+html.debug-ui .move-hints .hint {
+  outline: 1px solid #0a7a45;
+}
