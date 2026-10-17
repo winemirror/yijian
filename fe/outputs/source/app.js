@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.16.0b3-20261018";
+  const APP_ASSET_VERSION = "3.16.0b5-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -3831,8 +3831,53 @@
   function togglePlay() {
     state.playing = !state.playing;
     updatePlayButton();
-    if (state.playing) runAIDriver();
+    if (state.playing && !state.live) resumeLiveGame();
+    else if (state.playing) runAIDriver();
     else aiDriverToken += 1;
+    render();
+  }
+
+  function restartAIDriverFromState() {
+    if (netActive()) return;
+    const aiTurn = state.control[state.game.sideToMove] === "ai";
+    if (state.playing && aiTurn) runAIDriver();
+    else if (aiTurn) runAIDriver({ reply: true });
+  }
+
+  function enterReviewAt(ply) {
+    state.live = false;
+    state.reviewPly = clamp(Number(ply || 0), 0, state.game.history.length);
+    state.selected = null;
+    state.legalMoves = [];
+    if (!netActive()) {
+      // Invalidate any AI search that started before review mode.
+      if (Pikafish && typeof Pikafish.cancelActive === "function") {
+        Pikafish.cancelActive();
+      }
+      state.session += 1;
+      aiDriverToken += 1;
+      state.busy = false;
+      renderThinking();
+    }
+  }
+
+  function resumeLiveGame() {
+    state.live = true;
+    state.reviewPly = state.game.history.length;
+    state.selected = null;
+    state.legalMoves = [];
+    state.busy = false;
+    renderThinking();
+    if (!netActive() && state.game.result.type === "ongoing") {
+      if (!anyHumanControlled() && (state.control[RED] === "ai" || state.control[BLACK] === "ai")) {
+        state.playing = true;
+      }
+      updatePlayButton();
+      render();
+      restartAIDriverFromState();
+      return;
+    }
+    updatePlayButton();
     render();
   }
 
@@ -3870,7 +3915,7 @@
     refreshAnimationFlag();
     renderThinking();
     render();
-    runAIDriver({ reply: state.control[state.game.sideToMove] === "ai" });
+    restartAIDriverFromState();
   }
 
   function wait(ms) {
@@ -3899,7 +3944,7 @@
     } else if (!netActive()) {
       appendChat("对手", "新对局开始，请多指教。", false);
     }
-    runAIDriver({ reply: state.control[state.game.sideToMove] === "ai" });
+    restartAIDriverFromState();
   }
 
   function undo(options = {}) {
@@ -4048,10 +4093,7 @@
     if (!cell) return;
     const oldPly = currentPly();
     const nextPly = Number(cell.dataset.ply);
-    state.live = false;
-    state.reviewPly = nextPly;
-    state.selected = null;
-    state.legalMoves = [];
+    enterReviewAt(nextPly);
     render();
     if (nextPly === oldPly - 1) {
       animateMoveTransition(state.game.history[oldPly - 1], true);
@@ -4061,15 +4103,13 @@
   });
 
   elements.firstMove.addEventListener("click", () => {
-    state.live = false;
-    state.reviewPly = 0;
+    enterReviewAt(0);
     render();
   });
   elements.prevMove.addEventListener("click", () => {
     const oldPly = currentPly();
     const nextPly = Math.max(0, oldPly - 1);
-    state.live = false;
-    state.reviewPly = nextPly;
+    enterReviewAt(nextPly);
     render();
     if (nextPly === oldPly - 1) {
       animateMoveTransition(state.game.history[oldPly - 1], true);
@@ -4080,23 +4120,20 @@
     const nextPly = Math.min(state.game.history.length, oldPly + 1);
     state.reviewPly = nextPly;
     state.live = state.reviewPly === state.game.history.length;
-    render();
+    if (state.live) {
+      resumeLiveGame();
+    } else {
+      render();
+    }
     if (nextPly === oldPly + 1) {
       animateMoveTransition(state.game.history[nextPly - 1], false);
     }
-    runAIDriver();
   });
   elements.lastMove.addEventListener("click", () => {
-    state.live = true;
-    state.reviewPly = state.game.history.length;
-    render();
-    runAIDriver();
+    resumeLiveGame();
   });
   elements.liveMode.addEventListener("click", () => {
-    state.live = true;
-    state.reviewPly = state.game.history.length;
-    render();
-    runAIDriver();
+    resumeLiveGame();
   });
 
   document.querySelectorAll(".quick-chat").forEach((container) => {

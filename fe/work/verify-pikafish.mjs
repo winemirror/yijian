@@ -18,7 +18,7 @@ function check(label, ok) {
 }
 
 console.log("== pikafish 3.16b ==");
-check("page is marked 3.16b", html.includes("3.16.0b3-20261018"));
+check("page is marked 3.16b", html.includes("3.16.0b5-20261018"));
 check("pikafish client is loaded before app", html.indexOf("pikafish.js") < html.lastIndexOf("app.js"));
 check("both sides expose three cloud levels", (html.match(/pikafish:(fast|standard|deep)/g) || []).length === 6);
 check("setup parser accepts pikafish levels", app.includes('value.startsWith("pikafish:")'));
@@ -27,6 +27,11 @@ check("mixed games enable cloud analysis", app.includes("gameUsesPikafish()"));
 check("cloud analysis maps MultiPV moves", app.includes("findUciMove(board, side, raw.pv && raw.pv[0])"));
 check("cloud move validation rejects illegal replies", app.includes("皮卡鱼返回非法着法"));
 check("chosen move can use post-move evaluation", app.includes("derivedFromAfter"));
+check("review mode cancels stale AI work", app.includes("Pikafish.cancelActive()"));
+check("returning live restarts the AI driver", app.includes("function resumeLiveGame()") && app.includes("restartAIDriverFromState()"));
+check("continuous playback keeps infinite moves", app.includes("if (state.playing && aiTurn) runAIDriver()"));
+check("client can cancel the active cloud request", client.includes("function cancelActive()"));
+check("relay service handles cancellation", service.includes('data.t === "pf.cancel"') && service.includes("function cancelRequest"));
 check("relay room code is valid", client.includes('"PKAFST"') && service.includes('"PKAFST"'));
 check("relay service keeps the server compute-free", service.includes("wss://c.syjnb.top/ws"));
 check("desktop launcher embeds pikafish client", launcher.includes("YiJian.pikafish.js"));

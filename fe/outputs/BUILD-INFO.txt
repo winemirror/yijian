@@ -8,15 +8,15 @@
 
 APK 文件: Yijian-Xiangqi-3.16b.apk
 文件大小: 4465470 bytes
-SHA-256: 64D32C017ABAFE536A35C616160C4146FDB2D7B95AFA4EB0D82F0000A1033671
+SHA-256: 8D1ED1973A0506B5DAD6438BC1DD03649F18AC7BCB97E9C4C06E19B3139C49E3
 
 桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 534528 bytes
-SHA-256: 80C5FD81970584839662DD6222D7274C7CD53F9F20FCF9C44A8A9022F0746676
+文件大小: 535552 bytes
+SHA-256: 2A14D8ADC5558FE6E29DD5A46AE8E47119D57E2FBD4D1CC37FF1E2E5B75B9DC0
 
 分支: 3.16b-pikafish
 上游版本: v3.15
-资源版本: 3.16.0b3-20261018
+资源版本: 3.16.0b5-20261018
 
 本次改动:
   - 红黑双方新增皮卡鱼快速、标准、深度三档选项。
@@ -27,6 +27,8 @@ SHA-256: 80C5FD81970584839662DD6222D7274C7CD53F9F20FCF9C44A8A9022F0746676
   - 手机 Termux 端新增零依赖 Pikafish 中继服务。
   - 主 VPS 继续只做信令桥接，不在服务器执行引擎。
   - 修正移动端顶栏的 4px 横向溢出。
+  - 修正进入复盘后旧 AI 搜索未取消、回到当前后驱动未重启的问题。
+  - 连续 AI 对战中从历史复盘返回当前局面时，自动恢复无限连续驱动。
 
 线上入口:
   - https://web.syjnb.top/yijian-test/
