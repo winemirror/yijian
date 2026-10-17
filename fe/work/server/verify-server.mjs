@@ -320,6 +320,58 @@ try {
   check("房间密码用例完成", false, String(error && error.stack || error));
 }
 
+// 第四轮：固定房间码。
+console.log("== 固定房间码 ==");
+try {
+  const port5 = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "stun:stun.example.test:3478",
+    turnUrl: "",
+    turnSecret: "",
+  });
+
+  const a = await connect(port5);
+  a.send({ t: "hello", proto: 1, name: "甲" });
+  await a.next();
+  a.send({ t: "room.create", name: "固定房", visibility: "public", preferredId: "ABC234" });
+  const fixed = await a.next();
+  check("建房时沿用请求的固定房间码",
+    fixed.t === "room.joined" && fixed.room.id === "ABC234",
+    JSON.stringify(fixed.room));
+
+  const b = await connect(port5);
+  b.send({ t: "hello", proto: 1, name: "乙" });
+  await b.next();
+  b.send({ t: "room.create", name: "抢码房", visibility: "public", preferredId: "ABC234" });
+  const taken = await b.next();
+  check("房间码被占用时换一个新的",
+    taken.t === "room.joined" && taken.room.id !== "ABC234"
+      && /^[2-9A-HJ-NP-Z]{6}$/.test(taken.room.id),
+    JSON.stringify(taken.room));
+
+  a.send({ t: "room.leave" });
+  await a.next();
+  b.send({ t: "room.leave" });
+  await b.next();
+
+  const c = await connect(port5);
+  c.send({ t: "hello", proto: 1, name: "丙" });
+  await c.next();
+  c.send({ t: "room.create", name: "复用固定房", visibility: "public", preferredId: "ABC234" });
+  const reused = await c.next();
+  check("房间释放后可以复用同一个固定房间码",
+    reused.t === "room.joined" && reused.room.id === "ABC234",
+    JSON.stringify(reused.room));
+
+  a.close();
+  b.close();
+  c.close();
+  await close();
+} catch (error) {
+  check("固定房间码用例完成", false, String(error && error.stack || error));
+}
+
 console.log("");
 if (problems.length === 0) {
   console.log("SERVER CHECKS PASSED");

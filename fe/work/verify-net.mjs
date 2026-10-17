@@ -627,6 +627,41 @@ try {
   check("房间密码用例完成", false, String(error && error.stack || error));
 }
 
+console.log("== net.js + server: 固定房间码 ==");
+try {
+  const { listen, close } = await import("./server/server.mjs");
+  const port = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "stun:stun.example.test:3478",
+    turnUrl: "",
+    turnSecret: "",
+  });
+  const url = `ws://127.0.0.1:${port}/ws`;
+
+  const webRTC = makeFakeWebRTC();
+  const hostA = loadNet(webRTC, "fixed-a", { WebSocket });
+  const hostB = loadNet(webRTC, "fixed-b", { WebSocket });
+  await hostA.setServer(url);
+  await hostB.setServer(url);
+
+  const first = await hostA.hostRoom({ name: "固定码房", preferredId: "ABC234" });
+  check("hostRoom 会沿用请求的固定房间码",
+    !!first.room && first.room.id === "ABC234", first.room && first.room.id);
+
+  const second = await hostB.hostRoom({ name: "抢码房", preferredId: "ABC234" });
+  check("固定码被占用时服务端换一个新码",
+    !!second.room && second.room.id !== "ABC234"
+      && /^[2-9A-HJ-NP-Z]{6}$/.test(second.room.id),
+    second.room && second.room.id);
+
+  hostA.leave();
+  hostB.leave();
+  await close();
+} catch (error) {
+  check("固定房间码用例完成", false, String(error && error.stack || error));
+}
+
 console.log("== net.js: TURN 中继探测 ==");
 try {
   // 没配置 TURN：应立刻给出 no-turn-configured，而不是白等超时。
@@ -1029,6 +1064,19 @@ try {
   check("本局结束后金手指自动失效", engine.state.net.cheatAutoStep === false);
   engine.netLeave();
   check("离开房间也会清掉金手指", engine.state.net.cheatAutoStep === false);
+
+  // 房间码在对局中也要一直可见。
+  engine.state.net.roomCode = "ABC234";
+  engine.netBegin("guest", RED, "乙");
+  check("联机中房间码常驻可见",
+    engine.__document.getElementById("netCodeRow").hidden === false
+      && engine.__document.getElementById("netActiveCode").textContent === "ABC234",
+    JSON.stringify({
+      hidden: engine.__document.getElementById("netCodeRow").hidden,
+      text: engine.__document.getElementById("netActiveCode").textContent
+    }));
+  engine.netLeave();
+  check("离开房间后房间码清空", engine.state.net.roomCode === "");
 } catch (error) {
   check("app protocol completed", false, String(error && error.stack || error));
 }

@@ -307,7 +307,8 @@
             t: "room.create",
             name: room && room.name,
             visibility: "public",
-            password: (room && room.password) || ""
+            password: (room && room.password) || "",
+            preferredId: (room && room.preferredId) || ""
           });
           return waitFor("room.joined");
         }).then(function (message) {
@@ -1057,7 +1058,9 @@
         id: options.id || randomId(),
         name: options.name || "YiJian",
         role: "host",
-        password: options.password || ""
+        password: options.password || "",
+        // 固定房间码：让服务端优先复用上次分到的码（空闲才给）。
+        preferredId: options.preferredId || ""
       };
       hostingPromise = api.ready().then(function () {
         if (!state.transport) {
