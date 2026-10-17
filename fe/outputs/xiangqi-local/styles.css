@@ -270,6 +270,9 @@ select:focus {
 .game-column {
   min-width: 0;
   display: grid;
+  /* The implicit grid track is max-content-sized, so a long move ticker can
+     push every status child far outside the screen. Keep the track shrinkable. */
+  grid-template-columns: minmax(0, 1fr);
   justify-items: center;
 }
 

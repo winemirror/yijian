@@ -170,6 +170,8 @@ console.log("== move ticker ==");
 {
   check("markup has a move ticker", html.includes('id="moveTicker"'));
   check("ticker is horizontally scrollable and width-capped",
+    /\.game-column\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(css)
+    &&
     /\.move-ticker\s*\{[^}]*overflow-x:\s*auto/.test(css)
     && /\.move-ticker\s*\{[^}]*min-width:\s*0/.test(css)
     && /\.move-ticker\s*\{[^}]*max-width:\s*100%/.test(css)
