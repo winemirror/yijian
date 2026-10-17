@@ -209,6 +209,8 @@ let reconnectTimer = null;
 let heartbeat = null;
 let jobChain = Promise.resolve();
 let shuttingDown = false;
+let runningRequest = "";
+const cancelledRequests = new Set();
 
 function enqueue(job) {
   const next = jobChain.then(job, job);
@@ -239,10 +241,20 @@ async function handleEngineRequest(message) {
   );
   const multiPv = kind === "analyze" ? clamp(Number(data.multiPv || 3), 1, 5) : 1;
   const startedAt = Date.now();
+  const requestKey = `${message.from}:${id}`;
 
   log(`request ${id} kind=${kind} moves=${moves.length} time=${timeMs} multipv=${multiPv}`);
   try {
-    const result = await enqueue(() => engine.searchPosition({ moves, timeMs, multiPv }));
+    const result = await enqueue(async () => {
+      if (cancelledRequests.delete(requestKey)) throw new Error("cancelled");
+      runningRequest = requestKey;
+      try {
+        return await engine.searchPosition({ moves, timeMs, multiPv });
+      } finally {
+        if (runningRequest === requestKey) runningRequest = "";
+      }
+    });
+    if (cancelledRequests.delete(requestKey)) throw new Error("cancelled");
     relay.sendSignal(message.from, {
       t: "pf.result",
       id,
@@ -254,6 +266,10 @@ async function handleEngineRequest(message) {
     });
     log(`result ${id} best=${result.bestmove} pv=${result.candidates.length}`);
   } catch (error) {
+    if ((error && error.message) === "cancelled") {
+      log(`cancelled ${id}`);
+      return;
+    }
     relay.sendSignal(message.from, {
       t: "pf.error",
       id,
@@ -261,6 +277,14 @@ async function handleEngineRequest(message) {
     });
     log(`error ${id}: ${(error && error.message) || String(error)}`);
   }
+}
+
+function cancelRequest(from, id) {
+  if (!from || !id) return;
+  const requestKey = `${from}:${id}`;
+  cancelledRequests.add(requestKey);
+  if (runningRequest === requestKey) engine.stop();
+  setTimeout(() => cancelledRequests.delete(requestKey), 30000).unref();
 }
 
 class RelayClient {
@@ -358,7 +382,11 @@ class RelayClient {
       return;
     }
     if (message.t === "signal") {
-      void handleEngineRequest(message);
+      if (message.data && message.data.t === "pf.cancel") {
+        cancelRequest(message.from, String(message.data.id || ""));
+      } else {
+        void handleEngineRequest(message);
+      }
       return;
     }
     if (message.t === "room.closed") {
