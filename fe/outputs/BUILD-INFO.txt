@@ -1,46 +1,42 @@
-弈鉴 · 3.10 构建信息（2026-10-18）
+弈鉴 · 3.11 构建信息（2026-10-18）
 
 包名: com.yijian.xiangqi
-版本: 3.10 (versionCode 39)
+版本: 3.11 (versionCode 40)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.10.apk
+APK 文件: Yijian-Xiangqi-3.11.apk
+文件大小: 4376725 bytes
+SHA-256: 2BB0537EF8789022AF57470BF03665A9814C0DA5D105FAD755E2A569E96E5BFC
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 514560 bytes
+SHA-256: 05079FF37F79D13A72AB17D7626D56F639FDFBFD6BEA1625867B0DD3D8091AC8
+
+上一版: Yijian-Xiangqi-3.10.apk
 文件大小: 4376633 bytes
 SHA-256: C02532BD09D79F837DDC74F433548FB08B2FC096F3626AF94DD3ED97A762B7BB
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 514048 bytes
-SHA-256: AAFFF57E066DBDD9903C3978A187D840F2126F24815D8368963E70F3233D012A
+本次改动:
 
-上一版: Yijian-Xiangqi-3.9.apk
-文件大小: 4375617 bytes
-SHA-256: 3AA9CDE7BD820E26BB24E302748415ACC54CC36C71B1035E0B56165189100BA2
+1) /help 不再列出金手指
+   - CHAT_COMMANDS 里的 acesyj 标记 hidden: true；showChatCommands 本来就会跳过 hidden。
+   - /help 里不再出现 /acesyj，也不会出现【金手指】分组标题。
+   - 命令本身仍然可用（输入 /acesyj 照常开关自动下一步）。
 
-本次改动: 棋盘翻转
-
-- 顶栏新增「翻转」按钮（翻转后变成「摆正」）。翻转 = 坐标 180° 旋转：
-  棋子、落点提示、上一手虚线、走子拖影全部跟着换向，点击/落子判定仍然按
-  棋盘索引走，不受影响。
-- 翻转时红/黑两条玩家信息条也会上下互换（CSS order），让"己方在下方"保持一致。
-- 状态存 localStorage["xiangqi.board.flipped"]（1/0），下次打开沿用。
-- 联机第一次分到黑方时自动翻转（让己方在下）；用户手动设置过就尊重设置。
-
-实现:
-  - app.js：state.flipped + displayCol()/displayRow()；renderPieces / renderMoveLine /
-    animateMoveTransition 全部改用显示坐标；renderBoardFlip() 负责 class 与按钮文案；
-    toggleBoardFlip() 持久化并重绘。
-  - styles.css：.game-column.flipped 下用 order 把红色信息条移到上方、黑色移到下方。
+2) 多人对局禁用 /engine
+   - debugEngine 开头判断 netActive()：联机（含观战）时只提示
+     「多人对局中禁用 /engine（避免用引擎分析当前局面）」并直接返回，
+     不再做任何搜索。
+   - 单机仍可用；/bench、/perft、/selftest 用的是固定局面/开局，不受影响。
 
 验证:
-  verify-motion 新增 7 项：翻转按钮存在、信息条顺序、默认棋子坐标 (6,6)、
-  翻转后棋子坐标 (2,3)、翻转后虚线坐标、按钮切换、localStorage 持久化。
+  verify-net 新增 2 项：/help 不含 /acesyj 与【金手指】、多人对局中 /engine 被拒绝。
   六个套件全绿；perft(4) = 3290240。
 
 部署状态：已上线（2026-10-18）
-  - /var/www/web.syjnb.top/yijian/ 更新 app.js / index.html / styles.css
-    （资源版本 3.10.0-20261018）。
+  - /var/www/web.syjnb.top/yijian/ 更新 app.js / index.html（资源版本 3.11.0-20261018）。
   - 服务端无改动。
 
-说明: 基于 3.9 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.10 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
