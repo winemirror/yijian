@@ -1,43 +1,49 @@
-弈鉴 · 3.14 构建信息（2026-10-18）
+弈鉴 · 3.15 构建信息（2026-10-18）
 
 包名: com.yijian.xiangqi
-版本: 3.14 (versionCode 43)
+版本: 3.15 (versionCode 44)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.14.apk
+APK 文件: Yijian-Xiangqi-3.15.apk
+文件大小: 4460242 bytes
+SHA-256: FBADBDC66F05AA56374569B127BFF1E6FE502A12B765DDFB6AB64F5BFC263076
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 518144 bytes
+SHA-256: BE03C5F26738CD888E539088E34B89806A95F6C58BBA5B2EA98E5ABA1AD8F8FD
+
+上一版: Yijian-Xiangqi-3.14.apk
 文件大小: 4378021 bytes
 SHA-256: DFD2FAEBA39FE244C6A220B6992EB37D3D54C9696D2D02D1614B356ACAB2B364
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 517632 bytes
-SHA-256: CC08917B51D397C66F40424E66AFE06A8D35D120793B08BD3E8A307E1F0BCBA6
-
-上一版: Yijian-Xiangqi-3.13.apk
-文件大小: 4377877 bytes
-SHA-256: 9EFF0515A4316B7B233C0438F919029795C05F66665B568975AF610A009D640E
-
-本次改动: 限制走法播报栏宽度，超出时用滚动条
+本次改动: 修复长对局时滚动条出现在走法播报栏之外的问题
 
 原因:
-  .move-ticker 是 .game-status 的 flex 子项，默认 min-width:auto 意味着
-  它的最小宽度等于内容的 min-content 宽度。着法越多，这条横幅就越宽，
-  最终把 .game-status 甚至整页撑出屏幕。
+  .game-column 使用 CSS Grid，但没有声明列轨道。隐式 auto 轨道会按最长
+  内容的最大宽度扩张；走法播报越长，网格轨道和整页就越宽。虽然播报栏的
+  overflow-x:auto 已生效，它和状态栏仍会被居中到屏幕外，用户看到的是
+  页面级横向滚动条。
 
 修复:
-  - .move-ticker 增加 min-width: 0 与 max-width: 100%（配合原有 width/flex-basis），
-    宽度被锁在容器内，内容只能横向滚动。
-  - 滚动条更明显：WebKit 高度 6px、滑块 22% 黑、带 4% 的轨道；
-    Firefox 继续用 scrollbar-width: thin。
+  - 为 .game-column 声明 grid-template-columns: minmax(0, 1fr)，强制网格
+    轨道跟随可用宽度收缩。
+  - 保留 .move-ticker 的 width:100%、max-width:100%、min-width:0 和
+    overflow-x:auto，使滚动条固定在播报栏内部。
+  - verify-motion.mjs 增加网格轨道断言，防止回归。
 
 验证:
-  verify-motion 的 ticker 断言扩展为同时检查 overflow-x:auto、min-width:0、
-  max-width:100% 与 ::-webkit-scrollbar；六个套件全绿；perft(4)=3290240。
+  - 线上 AI 自对弈 45 手时，播报栏宽 690.4px、内容宽 2142px，滚动区域
+    完全位于状态栏内部；页面宽度保持 1265px，没有页面级横向溢出。
+  - 本地长对局 78 手时，播报栏内容宽 3715px、可视宽 690px，仍只在栏内滚动。
+  - verify-motion、verify-styles、verify-mate、verify-compat、verify-net、
+    server/verify-server 六个套件全部通过；perft(4)=3290240。
+  - APK versionCode=44、versionName=3.15，签名证书与 1.5 一致。
 
 部署状态：已上线（2026-10-18）
   - /var/www/web.syjnb.top/yijian/ 更新 app.js / index.html / styles.css
-    （资源版本 3.14.0-20261018）。
+    （资源版本 3.15.0-20261018）。
   - 服务端无改动。
 
-说明: 基于 3.13 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.14 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
