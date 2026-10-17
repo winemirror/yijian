@@ -1077,6 +1077,25 @@ try {
     }));
   engine.netLeave();
   check("离开房间后房间码清空", engine.state.net.roomCode === "");
+
+  // 聊天框斜杠命令：只在本地执行，绝不能发到对手那边。
+  sent.length = 0;
+  const unknown = engine.runChatCommand("nope");
+  check("未知斜杠命令返回 false 且不发消息",
+    unknown === false && sent.length === 0, JSON.stringify(sent));
+
+  engine.state.net.cheatAutoStep = false;
+  const okAces = engine.runChatCommand("acesyj");
+  check("聊天 /acesyj 开启金手指且不发消息",
+    okAces === true && engine.state.net.cheatAutoStep === true && sent.length === 0,
+    JSON.stringify({ ok: okAces, cheat: engine.state.net.cheatAutoStep, sent }));
+  engine.runChatCommand("acesyj");
+  check("再次输入 /acesyj 关闭金手指", engine.state.net.cheatAutoStep === false);
+
+  sent.length = 0;
+  engine.runChatCommand("help");
+  check("/help 只在本地输出、不发消息", sent.length === 0, JSON.stringify(sent));
+  engine.state.net.cheatAutoStep = false;
 } catch (error) {
   check("app protocol completed", false, String(error && error.stack || error));
 }
