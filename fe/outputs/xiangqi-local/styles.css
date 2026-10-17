@@ -293,6 +293,25 @@ select:focus {
   margin-top: 12px;
 }
 
+/* 棋盘翻转：把红方信息条移到上方、黑方移到下方，和棋子方向保持一致。 */
+.game-column.flipped .player-strip.red {
+  order: 1;
+  margin: 0 0 12px;
+}
+
+.game-column.flipped .board-stage {
+  order: 2;
+}
+
+.game-column.flipped .player-strip.black {
+  order: 3;
+  margin: 12px 0 0;
+}
+
+.game-column.flipped .game-status {
+  order: 4;
+}
+
 .player-main {
   display: flex;
   align-items: center;
