@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.11.0-20261018";
+  const APP_ASSET_VERSION = "3.12.0-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -3763,7 +3763,10 @@
     if (!inside(row, col)) return null;
     const distance = Math.hypot(x - (50 + col * 100), y - (50 + row * 100));
     if (distance > 46) return null;
-    return row * 9 + col;
+    // 翻转是 180° 对合变换（再翻一次就回来），所以同一个映射
+    // 也能把屏幕上的显示坐标换回棋盘索引。之前漏了这一步，
+    // 翻转后点空格会落到镜像位置，导致"选了棋子却走不出去"。
+    return displayRow(row) * 9 + displayCol(col);
   }
 
   elements.board.addEventListener("click", boardClick);
@@ -5482,6 +5485,7 @@
     DEFAULT_PIECE_COLORS,
     toggleBoardFlip,
     renderPieces,
+    pointToSquare,
     renderMoveLine,
     spawnMoveTrail,
     formatClock,

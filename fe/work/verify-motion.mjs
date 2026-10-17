@@ -133,6 +133,27 @@ console.log("== board flip ==");
     && flippedLine.includes('x2="250.0"') && flippedLine.includes('y2="450.0"'),
     flippedLine);
 
+  // 点击反解：屏幕坐标 -> 棋盘索引，翻转后必须也能对上。
+  engine.state.flipped = false;
+  check("未翻转时点击坐标反解正确",
+    engine.pointToSquare({ clientX: 650, clientY: 650 }) === 60,
+    String(engine.pointToSquare({ clientX: 650, clientY: 650 })));
+  engine.state.flipped = true;
+  check("翻转后点击坐标反解到正确棋盘索引",
+    engine.pointToSquare({ clientX: 650, clientY: 650 }) === 29,
+    String(engine.pointToSquare({ clientX: 650, clientY: 650 })));
+  const roundTrip = [0, 4, 60, 85].every((square) => {
+    const row = Math.floor(square / 9);
+    const col = square % 9;
+    const visualCol = 8 - col;
+    const visualRow = 9 - row;
+    return engine.pointToSquare({
+      clientX: 50 + visualCol * 100,
+      clientY: 50 + visualRow * 100
+    }) === square;
+  });
+  check("翻转后显示位置与棋盘索引一一对应", roundTrip);
+
   engine.state.flipped = false;
   engine.toggleBoardFlip();
   check("翻转按钮切换状态", engine.state.flipped === true);

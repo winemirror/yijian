@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| 当前版本 | 3.11（versionCode 40） |
+| 当前版本 | 3.12（versionCode 41） |
 | 运行形态 | 浏览器离线版 / Windows 便携 EXE / Android APK |
 | 前端 | 原生 JavaScript，零框架、零构建步骤 |
 | 服务端 | Node.js，零依赖（WebSocket 按 RFC 6455 手写） |
