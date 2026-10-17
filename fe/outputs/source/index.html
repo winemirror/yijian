@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="弈鉴">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>弈鉴 · 本地中国象棋</title>
+  <title>弈鉴 3.16b · 皮卡鱼测试版</title>
   <script>
     /* Compatibility guard. Runs before any modern syntax is parsed, so an old
        WebView shows a readable message instead of a blank white page. This
@@ -88,7 +88,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=3.16.0b3-20261018">
 </head>
 <body>
   <noscript>
@@ -102,7 +102,7 @@
         <div class="brand-mark">弈</div>
         <div>
           <h1>弈鉴</h1>
-          <p>本地中国象棋 · 人机对弈与分析</p>
+          <p>本地中国象棋 · 皮卡鱼测试版</p>
         </div>
       </div>
 
@@ -116,6 +116,9 @@
             <option value="ai:medium">AI · 初级</option>
             <option value="ai:hard">AI · 中级</option>
             <option value="ai:master">AI · 高级</option>
+            <option value="pikafish:fast">皮卡鱼 · 快速（云端）</option>
+            <option value="pikafish:standard">皮卡鱼 · 标准（云端）</option>
+            <option value="pikafish:deep">皮卡鱼 · 深度（云端）</option>
             <option value="ai:idiot">AI · 瞎几把下</option>
           </select>
         </label>
@@ -128,6 +131,9 @@
             <option value="ai:medium" selected>AI · 初级</option>
             <option value="ai:hard">AI · 中级</option>
             <option value="ai:master">AI · 高级</option>
+            <option value="pikafish:fast">皮卡鱼 · 快速（云端）</option>
+            <option value="pikafish:standard">皮卡鱼 · 标准（云端）</option>
+            <option value="pikafish:deep">皮卡鱼 · 深度（云端）</option>
             <option value="ai:idiot">AI · 瞎几把下</option>
           </select>
         </label>
@@ -152,6 +158,7 @@
         <button id="autoStep" class="btn" type="button" title="让系统替你走一步当前最优着法">自动下一步</button>
         <button id="newGame" class="btn primary" type="button">新对局</button>
         <button id="undoMove" class="btn" type="button">悔棋</button>
+        <button id="flipBoard" class="btn" type="button" title="翻转棋盘（黑方在下）">翻转</button>
       </div>
     </header>
 
@@ -235,6 +242,7 @@
             </div>
             <div id="moveCounter" class="move-counter">第 1 回合</div>
           </div>
+          <div id="moveTicker" class="move-ticker" aria-label="走法播报"></div>
         </div>
       </section>
 
@@ -323,6 +331,7 @@
             <button type="button" data-chat="承让">承让</button>
             <button type="button" data-chat="再想想">再想想</button>
             <button type="button" data-chat="精彩">精彩</button>
+            <button type="button" id="chatNudge" class="nudge" title="提醒对手该走棋了">催一下</button>
           </div>
           <form id="chatForm" class="chat-form">
             <input id="chatInput" type="text" maxlength="80" placeholder="说点什么">
@@ -349,7 +358,7 @@
               </label>
               <label class="field" id="netServerField" hidden>
                 <span>服务器地址</span>
-                <input id="netServerUrl" type="text" placeholder="wss://yijian.example.com/ws">
+                <input id="netServerUrl" type="text" value="wss://c.syjnb.top/ws" placeholder="wss://c.syjnb.top/ws">
               </label>
             </div>
             <div class="section-block">
@@ -359,6 +368,10 @@
               <label class="field">
                 <span>房间名</span>
                 <input id="netRoomName" type="text" maxlength="20" value="我的棋局">
+              </label>
+              <label class="field" id="netPasswordField" hidden>
+                <span>房间密码</span>
+                <input id="netRoomPassword" type="text" maxlength="32" placeholder="留空则不设密码">
               </label>
               <label class="field">
                 <span>我方执棋</span>
@@ -373,7 +386,7 @@
 
             <div class="section-block">
               <div class="section-head">
-                <h2>局域网房间</h2>
+                <h2 id="netRoomsTitle">房间列表</h2>
                 <button id="netSelfTest" class="btn small" type="button">网络自检</button>
                 <button id="netRefresh" class="btn small" type="button">刷新</button>
               </div>
@@ -395,6 +408,11 @@
           <div id="netActive" hidden>
             <div class="net-status">
               <div id="netStatusText" class="net-status-text">未联机</div>
+              <div id="netCodeRow" class="net-code-row" hidden>
+                <span class="net-code-label">房间码</span>
+                <strong id="netActiveCode" class="net-code-value">------</strong>
+                <button id="netCopyCode" class="btn small" type="button" title="复制房间码">复制</button>
+              </div>
               <div id="netDetail" class="net-detail"></div>
             </div>
             <div class="net-actions">
@@ -411,8 +429,9 @@
     </main>
   </div>
 
-  <script src="ai-data.js"></script>
-  <script src="net.js"></script>
-  <script src="app.js"></script>
+  <script src="ai-data.js?v=3.16.0b3-20261018"></script>
+  <script src="net.js?v=3.16.0b3-20261018"></script>
+  <script src="pikafish.js?v=3.16.0b3-20261018"></script>
+  <script src="app.js?v=3.16.0b3-20261018"></script>
 </body>
 </html>

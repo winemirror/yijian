@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.15.0-20261018";
+  const APP_ASSET_VERSION = "3.16.0b3-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -103,6 +103,20 @@
       lmr: true
     }
   };
+  const PIKAFISH_LEVELS = {
+    "pikafish-fast": { label: "皮卡鱼 · 快速", moveMs: 500, analysisMs: 1200 },
+    "pikafish-standard": { label: "皮卡鱼 · 标准", moveMs: 1000, analysisMs: 1800 },
+    "pikafish-deep": { label: "皮卡鱼 · 深度", moveMs: 2200, analysisMs: 3200 }
+  };
+
+  function isPikafishLevel(levelKey) {
+    return Object.prototype.hasOwnProperty.call(PIKAFISH_LEVELS, levelKey);
+  }
+
+  function levelLabel(levelKey) {
+    if (isPikafishLevel(levelKey)) return PIKAFISH_LEVELS[levelKey].label;
+    return (AI_LEVELS[levelKey] || AI_LEVELS.medium).label;
+  }
   const ANALYSIS_LEVEL = {
     depth: 5,
     timeMs: 2800,
@@ -2052,9 +2066,18 @@
       ? analysis.moveScores
       : analysis.candidates;
     const best = allScores[0];
-    const chosen = allScores.find((candidate) => (
+    let chosen = allScores.find((candidate) => (
       candidate.move.from === record.from && candidate.move.to === record.to
     ));
+    if (
+      !chosen
+      && record.chosen
+      && record.chosen.move
+      && record.chosen.move.from === record.from
+      && record.chosen.move.to === record.to
+    ) {
+      chosen = record.chosen;
+    }
     if (!chosen) {
       return {
         score: 0,
@@ -2344,7 +2367,109 @@
     }
   }
 
-  async function analyzePositionScheduled(board, side, options) {
+  function gameUsesPikafish() {
+    return [RED, BLACK].some((side) => (
+      state.control[side] === "ai" && isPikafishLevel(levelFor(side))
+    ));
+  }
+
+  function pikafishLevelFor(side) {
+    const own = levelFor(side);
+    if (isPikafishLevel(own)) return own;
+    const red = levelFor(RED);
+    if (isPikafishLevel(red)) return red;
+    const black = levelFor(BLACK);
+    return isPikafishLevel(black) ? black : "pikafish-standard";
+  }
+
+  function pikafishScore(candidate) {
+    if (candidate && candidate.mate !== null && candidate.mate !== undefined) {
+      return candidate.mate > 0
+        ? MATE - Math.abs(candidate.mate) * 100
+        : -MATE + Math.abs(candidate.mate) * 100;
+    }
+    return Number(candidate && candidate.scoreCp || 0);
+  }
+
+  function pikafishWinRed(candidate, side, fallback) {
+    const wdl = candidate && candidate.wdl;
+    if (Array.isArray(wdl) && wdl.length === 3) {
+      const win = Number(wdl[0]) / 10;
+      const loss = Number(wdl[2]) / 10;
+      return clamp(side === RED ? win : loss, 0.5, 99.5);
+    }
+    return clamp(defaultTo(fallback, 50), 0.5, 99.5);
+  }
+
+  async function analyzeWithPikafish(board, side, options, historyMoves) {
+    if (!Pikafish) throw new Error("皮卡鱼客户端未加载");
+    const levelKey = pikafishLevelFor(side);
+    const response = await Pikafish.analyze(
+      historyMoves || [],
+      levelKey,
+      {
+        multiPv: defaultTo(options.candidates, 3),
+        timeMs: defaultTo(options.pikafishTimeMs, PIKAFISH_LEVELS[levelKey].analysisMs)
+      }
+    );
+
+    const ranked = [];
+    const rawCandidates = response.candidates || [];
+    for (let index = 0; index < rawCandidates.length; index += 1) {
+      const raw = rawCandidates[index];
+      const move = findUciMove(board, side, raw.pv && raw.pv[0]);
+      if (!move) continue;
+      const score = pikafishScore(raw);
+      ranked.push({
+        move,
+        score,
+        evalRed: side === RED ? score : -score,
+        winRed: pikafishWinRed(raw, side, scoreToRedWin(score, side)),
+        depth: raw.depth,
+        nodes: raw.nodes,
+        wdl: raw.wdl,
+        pv: raw.pv
+      });
+    }
+    if (ranked.length === 0) {
+      throw new Error("皮卡鱼没有返回合法候选着法");
+    }
+    ranked.sort((a, b) => b.score - a.score);
+    const best = ranked[0];
+    return {
+      side,
+      score: best.score,
+      evalRed: best.evalRed,
+      winRed: best.winRed,
+      bestMove: best.move,
+      bestNotation: moveToNotation(board, best.move),
+      candidates: ranked.slice(0, defaultTo(options.candidates, 5)),
+      moveScores: ranked,
+      nodes: Math.max(...ranked.map((item) => Number(item.nodes || 0))),
+      depth: Math.max(...ranked.map((item) => Number(item.depth || 0))),
+      elapsed: response.elapsedMs || 0,
+      terminal: false,
+      engine: "pikafish",
+      cloud: true
+    };
+  }
+
+  async function choosePikafishMove(game, levelKey) {
+    if (!Pikafish) throw new Error("皮卡鱼客户端未加载");
+    setStatus(`皮卡鱼思考中 · ${levelLabel(levelKey)}`);
+    const response = await Pikafish.chooseMove(historyToUci(game.history), levelKey);
+    const move = findUciMove(game.board, game.sideToMove, response.bestmove);
+    if (!move) throw new Error(`皮卡鱼返回非法着法：${response.bestmove || "-"}`);
+    document.documentElement.dataset.pikafishLast = response.bestmove;
+    document.documentElement.dataset.pikafishEngine =
+      response.engine || "pikafish";
+    return move;
+  }
+
+  async function analyzePositionScheduled(board, side, options, historyMoves) {
+    if (gameUsesPikafish()) {
+      return analyzeWithPikafish(board, side, options, historyMoves);
+    }
     const settings = {
       depth: defaultTo(options.depth, 4),
       timeMs: defaultTo(options.timeMs, 2800),
@@ -2380,6 +2505,9 @@
   }
 
   async function chooseAIMoveScheduled(game, levelKey) {
+    if (isPikafishLevel(levelKey)) {
+      return choosePikafishMove(game, levelKey);
+    }
     const level = AI_LEVELS[levelKey] || AI_LEVELS.medium;
     const bookMove = chooseOpeningBookMove(game, level, levelKey);
     if (bookMove) return bookMove;
@@ -2558,6 +2686,31 @@
   // harness, which disables the multiplayer entry points without touching any
   // of the single-player paths.
   const Net = (typeof window !== "undefined" && window.XiangqiNet) || null;
+  const Pikafish = (typeof window !== "undefined" && window.XiangqiPikafish) || null;
+
+  function moveToUci(move) {
+    const square = (index) => `${FILES[index % 9]}${9 - Math.floor(index / 9)}`;
+    return `${square(move.from)}${square(move.to)}`;
+  }
+
+  function historyToUci(history, length) {
+    const count = defaultTo(length, history.length);
+    const moves = [];
+    for (let index = 0; index < count && index < history.length; index += 1) {
+      moves.push(moveToUci(history[index]));
+    }
+    return moves;
+  }
+
+  function findUciMove(board, side, uci) {
+    const token = String(uci || "").toLowerCase();
+    if (!/^[a-i][0-9][a-i][0-9]$/.test(token)) return null;
+    const square = (name) => (9 - Number(name[1])) * 9 + FILES.indexOf(name[0]);
+    const from = square(token.slice(0, 2));
+    const to = square(token.slice(2, 4));
+    return generateLegalMoves(board, side)
+      .find((move) => move.from === from && move.to === to) || null;
+  }
 
   function netActive() {
     return !!(state.net && state.net.active);
@@ -2583,6 +2736,13 @@
     // "玩家" is what the two selects show while a net room is active.
     if (value === "player") return { control: "human", level: null };
     if (value === "human") return { control: "human", level: null };
+    if (typeof value === "string" && value.startsWith("pikafish:")) {
+      const level = `pikafish-${value.slice(9)}`;
+      return {
+        control: "ai",
+        level: isPikafishLevel(level) ? level : "pikafish-standard"
+      };
+    }
     if (typeof value === "string" && value.startsWith("ai:")) {
       const level = value.slice(3);
       return { control: "ai", level: AI_LEVELS[level] ? level : "medium" };
@@ -2591,7 +2751,9 @@
   }
 
   function setupValue(side) {
-    return state.control[side] === "human" ? "human" : `ai:${state.levels[side]}`;
+    if (state.control[side] === "human") return "human";
+    const level = state.levels[side];
+    return isPikafishLevel(level) ? `pikafish:${level.slice(9)}` : `ai:${level}`;
   }
 
   function applySetup(side, value) {
@@ -2640,7 +2802,7 @@
 
   function controlLabel(side) {
     if (netActive()) return side === state.net.mySide ? "你" : "对手";
-    return state.control[side] === "human" ? "你" : `AI · ${AI_LEVELS[levelFor(side)].label}`;
+    return state.control[side] === "human" ? "你" : levelLabel(levelFor(side));
   }
 
   function anyHumanControlled() {
@@ -2652,7 +2814,8 @@
     if (netActive()) {
       return `${color} · ${side === state.net.mySide ? "你" : "对手"}`;
     }
-    return state.control[side] === "human" ? `${color} · 你` : `${color} · AI`;
+    if (state.control[side] === "human") return `${color} · 你`;
+    return `${color} · ${isPikafishLevel(levelFor(side)) ? "皮卡鱼" : "本地 AI"}`;
   }
 
   // --- Piece colours ---------------------------------------------------------
@@ -3016,6 +3179,9 @@
     }
     elements.redLabel.textContent = controlLabel(RED);
     elements.blackLabel.textContent = controlLabel(BLACK);
+    if (elements.chartHint) {
+      elements.chartHint.textContent = gameUsesPikafish() ? "皮卡鱼分析" : "每步更新";
+    }
   }
 
   // --- 棋盘翻转 ---
@@ -3492,28 +3658,48 @@
   }
 
   async function analyzeAndAttach(record, levels = {}) {
-    const beforeLevel = levels.before || ANALYSIS_LEVEL;
-    const afterLevel = levels.after || CURRENT_ANALYSIS_LEVEL;
-    const boardBefore = positionAtPly(state.game.history, record.index);
-    const analysis = await analyzePositionScheduled(
-      boardBefore,
-      record.side,
-      beforeLevel
-    );
-    record.analysis = analysis;
-    record.chosen = (analysis.moveScores || analysis.candidates).find((candidate) => (
-      candidate.move.from === record.from && candidate.move.to === record.to
-    )) || null;
+    try {
+      const beforeLevel = levels.before || ANALYSIS_LEVEL;
+      const afterLevel = levels.after || CURRENT_ANALYSIS_LEVEL;
+      const boardBefore = positionAtPly(state.game.history, record.index);
+      const beforeHistory = historyToUci(state.game.history, record.index);
+      const analysis = await analyzePositionScheduled(
+        boardBefore,
+        record.side,
+        beforeLevel,
+        beforeHistory
+      );
+      record.analysis = analysis;
+      const boardAfter = positionAtPly(state.game.history, record.index + 1);
+      const sideAfter = opposite(record.side);
+      const afterHistory = historyToUci(state.game.history, record.index + 1);
+      record.afterAnalysis = await analyzePositionScheduled(
+        boardAfter,
+        sideAfter,
+        afterLevel,
+        afterHistory
+      );
+      let chosen = (analysis.moveScores || analysis.candidates).find((candidate) => (
+        candidate.move.from === record.from && candidate.move.to === record.to
+      )) || null;
+      if (!chosen && record.afterAnalysis) {
+        chosen = {
+          move: { from: record.from, to: record.to },
+          score: record.afterAnalysis.score,
+          evalRed: record.afterAnalysis.evalRed,
+          winRed: record.afterAnalysis.winRed,
+          derivedFromAfter: true
+        };
+      }
+      record.chosen = chosen;
       record.winRedAfter = defaultTo(record.chosen && record.chosen.winRed, analysis.winRed);
       record.evalRedAfter = defaultTo(record.chosen && record.chosen.evalRed, analysis.evalRed);
-    record.quality = qualityForRecord(record, analysis);
-    const boardAfter = positionAtPly(state.game.history, record.index + 1);
-    const sideAfter = opposite(record.side);
-    record.afterAnalysis = await analyzePositionScheduled(
-      boardAfter,
-      sideAfter,
-      afterLevel
-    );
+      record.quality = qualityForRecord(record, analysis);
+    } catch (error) {
+      document.documentElement.dataset.pikafishError =
+        (error && error.message) || String(error);
+      setStatus(`皮卡鱼分析失败：${(error && error.message) || String(error)}`);
+    }
   }
 
   // Makes a single AI move for whichever side is on the move. Shared by normal
@@ -3530,7 +3716,18 @@
     if (options.pauseBefore) await wait(options.pauseBefore);
     if (session !== state.session) return;
 
-    const move = await chooseAIMoveScheduled(state.game, levelFor(side));
+    let move = null;
+    try {
+      move = await chooseAIMoveScheduled(state.game, levelFor(side));
+    } catch (error) {
+      state.busy = false;
+      document.documentElement.dataset.pikafishError =
+        (error && error.message) || String(error);
+      setStatus(`皮卡鱼不可用：${(error && error.message) || String(error)}`);
+      renderThinking();
+      render();
+      return null;
+    }
     if (session !== state.session) return;
     if (!move) {
       state.busy = false;
@@ -3673,7 +3870,7 @@
     refreshAnimationFlag();
     renderThinking();
     render();
-    runAIDriver();
+    runAIDriver({ reply: state.control[state.game.sideToMove] === "ai" });
   }
 
   function wait(ms) {
@@ -3702,7 +3899,7 @@
     } else if (!netActive()) {
       appendChat("对手", "新对局开始，请多指教。", false);
     }
-    runAIDriver();
+    runAIDriver({ reply: state.control[state.game.sideToMove] === "ai" });
   }
 
   function undo(options = {}) {
@@ -5515,7 +5712,13 @@
     generateLegalMoves,
     orderedMoves,
     AI_LEVELS,
+    PIKAFISH_LEVELS,
     ANALYSIS_LEVEL,
+    isPikafishLevel,
+    levelLabel,
+    gameUsesPikafish,
+    moveToUci,
+    findUciMove,
     analyzePosition,
     searchMoveSubset,
     chooseAIMove,
