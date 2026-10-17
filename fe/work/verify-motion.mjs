@@ -169,8 +169,11 @@ console.log("== board flip ==");
 console.log("== move ticker ==");
 {
   check("markup has a move ticker", html.includes('id="moveTicker"'));
-  check("ticker is horizontally scrollable",
-    /\.move-ticker\s*\{[^}]*overflow-x:\s*auto/.test(css));
+  check("ticker is horizontally scrollable and width-capped",
+    /\.move-ticker\s*\{[^}]*overflow-x:\s*auto/.test(css)
+    && /\.move-ticker\s*\{[^}]*min-width:\s*0/.test(css)
+    && /\.move-ticker\s*\{[^}]*max-width:\s*100%/.test(css)
+    && /\.move-ticker::-webkit-scrollbar\s*\{/.test(css));
 
   engine.reset();
   engine.state.game.play(60, 51);
