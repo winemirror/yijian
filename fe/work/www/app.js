@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.6.0-20261018";
+  const APP_ASSET_VERSION = "3.7.0-20261018";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2488,6 +2488,9 @@
     netManual: document.getElementById("netManual"),
     netManualJoin: document.getElementById("netManualJoin"),
     netStatusText: document.getElementById("netStatusText"),
+    netCodeRow: document.getElementById("netCodeRow"),
+    netActiveCode: document.getElementById("netActiveCode"),
+    netCopyCode: document.getElementById("netCopyCode"),
     netDetail: document.getElementById("netDetail"),
     netResign: document.getElementById("netResign"),
     netNewGame: document.getElementById("netNewGame"),
@@ -2535,6 +2538,8 @@
       available: false,
       pendingUndo: false,
       sentAt: 0,
+      // 当前房间码（服务端分配，固定不变；对局中也常驻显示）
+      roomCode: "",
       // 金手指：房间码输入 acesyj 开启，允许联机时用「自动下一步」，仅本局有效。
       cheatAutoStep: false
     }
@@ -4196,6 +4201,12 @@
           : "正在连接房间…";
       }
     }
+    // 房间码在房间里始终可见（对局中也一样），方便中途再拉人。
+    if (elements.netCodeRow) {
+      const code = net.roomCode || "";
+      elements.netCodeRow.hidden = !net.inRoom || !code;
+      if (elements.netActiveCode) elements.netActiveCode.textContent = code || "------";
+    }
     if (elements.netDetail && net.inRoom) {
       if (net.spectating) {
         elements.netDetail.textContent = `房主：${net.peerName} · 通道：${net.mode || "-"}`;
@@ -4248,6 +4259,25 @@
   const NET_MODE_KEY = "xiangqi.net.mode";
   const NET_SERVER_KEY = "xiangqi.net.server";
   const DEFAULT_NET_SERVER = "wss://c.syjnb.top/ws";
+  // 主机的房间码固定：记住上一次分到的码，下次建房优先复用（服务端空闲才给）。
+  const NET_ROOM_CODE_KEY = "xiangqi.net.roomCode";
+
+  function loadPreferredRoomCode() {
+    try {
+      return localStorage.getItem(NET_ROOM_CODE_KEY) || "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function savePreferredRoomCode(code) {
+    try {
+      if (code) localStorage.setItem(NET_ROOM_CODE_KEY, code);
+      else localStorage.removeItem(NET_ROOM_CODE_KEY);
+    } catch (error) {
+      // 隐私模式下存不了，不影响使用。
+    }
+  }
 
   // 两种模式显示的东西不一样；启动时和切换时都走这一份规则，免得两处不一致。
   function netApplyModeVisibility(useServer) {
@@ -4344,6 +4374,33 @@
     updateAutoStepButton();
   }
 
+  // 一键复制房间码：优先用 Clipboard API，老 WebView 退回 execCommand。
+  function netCopyRoomCode() {
+    const code = state.net.roomCode;
+    if (!code) return;
+    const done = () => netLog(`房间码 ${code} 已复制`);
+    const fail = () => netLog(`房间码：${code}`);
+    if (typeof navigator !== "undefined" && navigator.clipboard
+      && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(code).then(done, fail);
+      return;
+    }
+    try {
+      const input = document.createElement("textarea");
+      input.value = code;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      document.body.appendChild(input);
+      input.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(input);
+      if (ok) done(); else fail();
+    } catch (error) {
+      fail();
+    }
+  }
+
   async function netJoinByCode(want, codeOverride) {
     if (!Net || typeof Net.joinByCode !== "function") return;
     if (state.net.inRoom) return;
@@ -4383,8 +4440,9 @@
     enterNetSetup();
     netLog(`正在通过服务器加入「${code}」…`);
     netRender();
+    let joined = null;
     try {
-      await Net.joinByCode(code, {
+      joined = await Net.joinByCode(code, {
         player: netPlayerName,
         want: state.net.want,
         password: password
@@ -4395,6 +4453,7 @@
       netRender();
       return;
     }
+    if (joined && joined.room && joined.room.id) state.net.roomCode = joined.room.id;
     // 密码错了：服务器会回 bad_password，这里再给一次输入机会。
     const settled = typeof Net.status === "function" ? Net.status() : null;
     if (settled && settled.phase === "error" && String(settled.error || "").indexOf("密码") >= 0) {
@@ -4404,11 +4463,12 @@
         return;
       }
       try {
-        await Net.joinByCode(code, {
+        const retried = await Net.joinByCode(code, {
           player: netPlayerName,
           want: state.net.want,
           password: retry
         });
+        if (retried && retried.room && retried.room.id) state.net.roomCode = retried.room.id;
       } catch (error) {
         netLog("加入房间失败：" + netErrorText(error && error.message));
       }
@@ -4528,14 +4588,20 @@
     enterNetSetup();
     try {
       const roomPassword = defaultTo(elements.netRoomPassword && elements.netRoomPassword.value, "").trim();
+      // 每个房间一个固定码：优先复用上次分到的码（服务端空闲才给，否则换新的）。
+      const preferredId = loadPreferredRoomCode();
       const created = await Net.hostRoom({
         name: defaultTo(elements.netRoomName && elements.netRoomName.value.trim(), "") || "我的棋局",
         player: netPlayerName,
-        password: roomPassword
+        password: roomPassword,
+        preferredId: preferredId
       });
       if (created && created.mode === "server" && created.room && created.room.id) {
+        state.net.roomCode = created.room.id;
+        savePreferredRoomCode(created.room.id);
         netLog(`房间码 ${created.room.id} —— 发给对手即可加入`
-          + (roomPassword ? "（已设密码）" : ""));
+          + (roomPassword ? "（已设密码）" : "")
+          + (preferredId && preferredId === created.room.id ? "（沿用上次的房间码）" : ""));
       } else {
         netLog(`正在广播房间，我方执${side === RED ? "红" : "黑"}`);
       }
@@ -4587,6 +4653,7 @@
     state.net.phase = "idle";
     state.net.pendingUndo = false;
     state.net.cheatAutoStep = false;
+    state.net.roomCode = "";
     // Refresh the buttons: "auto next step" comes back once the room is gone.
     render();
     netRender();
@@ -4641,6 +4708,7 @@
   function netWire() {
     if (elements.netHost) elements.netHost.addEventListener("click", netHost);
     if (elements.chatNudge) elements.chatNudge.addEventListener("click", netNudge);
+    if (elements.netCopyCode) elements.netCopyCode.addEventListener("click", netCopyRoomCode);
     if (elements.netSelfTest) {
       elements.netSelfTest.addEventListener("click", netRunSelfTest);
     }

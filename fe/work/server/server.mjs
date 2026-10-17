@@ -343,7 +343,10 @@ function handleMessage(client, raw) {
       if (client.roomsCreated >= MAX_ROOMS_PER_CLIENT) {
         return sendError(client, "too_many_rooms", "slow down");
       }
-      const id = makeRoomCode();
+      // 固定房间码：客户端可请求复用上次分到的码；只有格式合法且当前空闲才给。
+      const requested = String(message.preferredId || "").toUpperCase();
+      const preferredOk = /^[2-9A-HJ-NP-Z]{6}$/.test(requested) && !rooms.has(requested);
+      const id = preferredOk ? requested : makeRoomCode();
       const password = passwordOf(message);
       const room = {
         id,
@@ -360,7 +363,8 @@ function handleMessage(client, raw) {
       rooms.set(id, room);
       client.roomsCreated += 1;
       joinRoom(client, room, "player");
-      log(`room ${id} created by ${client.id}${password ? " (locked)" : ""}`);
+      log(`room ${id} created by ${client.id}${password ? " (locked)" : ""}`
+        + (preferredOk ? " [preferred]" : ""));
       return;
     }
 

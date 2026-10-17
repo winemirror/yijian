@@ -1,43 +1,52 @@
-弈鉴 · 3.6 构建信息（2026-10-18）
+弈鉴 · 3.7 构建信息（2026-10-18）
 
 包名: com.yijian.xiangqi
-版本: 3.6 (versionCode 35)
+版本: 3.7 (versionCode 36)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.6.apk
+APK 文件: Yijian-Xiangqi-3.7.apk
+文件大小: 4366937 bytes
+SHA-256: CD228950C642FEC6254F5620210F2605538056A9D05A0C8DBBF93DFC3BE6583C
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 487936 bytes
+SHA-256: 4290F86FE0E812F040DC257224A5DAE3787A98CEDDCED6E30144E3A7EC8A87F9
+
+上一版: Yijian-Xiangqi-3.6.apk
 文件大小: 4365445 bytes
 SHA-256: 88153B84419FD5CCA341769AFE194A96F14FA41B848A790835F48BE3B3A4C510
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 483840 bytes
-SHA-256: 6E45F96B077718213D87188F15273EDC6FD7EC4B06F5C9EADD2781E81FB50AB1
+本次改动: 房间码在对局中常驻显示 + 每个房间固定分配房间码
 
-上一版: Yijian-Xiangqi-3.5.apk
-文件大小: 4364801 bytes
-SHA-256: F80538E41904704F58B45EA67F5E6E229532B8C9BFEDF459FCE96660A41B846D
+1) 对局中房间码不再隐藏
+   - 以前只有建房时在房间日志里打一行房间码，进入对局后 netActive 面板里看不到。
+   - 现在房间面板常驻一行「房间码 XXXXXX [复制]」：host 与 guest 都显示，
+     对局进行中、等待加入、观战都可见；复制优先用 Clipboard API，
+     老 WebView 退回 textarea + execCommand。
+   - 房间码存在 state.net.roomCode，离开房间时清空。
 
-本次改动: 金手指（联机可用「自动下一步」，仅生效一局）
-
-- 触发方式：多人对战（服务器模式）下，在房间码输入框里输入 `acesyj` 后点「加入」。
-  这是暗号而不是房间码，不会去连房间；再输一次则关闭。
-- 开启后 `state.net.cheatAutoStep = true`，
-  `updateAutoStepButton()` 在联机时放行「自动下一步」（仅当轮到自己），
-  聊天区与房间日志都会提示「金手指已开启」。
-- 走子同步：`playAutoStep()` 生成的着法会调用 `netSendMove(record)`，
-  对手看到的就是一条普通走子消息，不会出现两端不一致。
-- 仅生效一局：`markMoveTiming()` 在检测到本局结束时把 `cheatAutoStep` 置回 false，
-  房间日志追加「金手指已失效（本局结束）」；`netLeave()` 也会清掉。
-- 观战者无效（mySide 为 null，`canMoveLocally()` 恒为 false）。
+2) 固定房间码
+   - 服务端 room.create 新增可选 preferredId：格式合法且当前未被占用时直接采用，
+     否则退回随机生成（并在日志里标 [preferred]）。
+   - 客户端把上次分到的房间码存 localStorage("xiangqi.net.roomCode")，
+     下次建房自动作为 preferredId 发过去；如果该码空闲就沿用，被占用则自然换新码。
+   - 也就是说同一个主机的房间码默认是固定的（像"个人房间号"），
+     但房间本身仍然只在建房期间存在，离开即解散。
 
 验证:
-  verify-net 新增 4 项：金手指可切换、开启后联机 autoStep 按钮可用、
-  本局结束后自动失效、离开房间会清掉。六个套件全绿；perft(4) = 3290240。
-  EXE 与 APK 内均确认包含 `ACESYJ` 与 `netToggleCheat`。
+  verify-server 新增 3 项：沿用 preferredId、被占用时换新码、房间释放后可复用同一码。
+  verify-net 新增 3 项：hostRoom 透传 preferredId、联机中房间码常驻可见、离开房间清空。
+  另外修了一处 CSS 兼容性：新加的 .net-code-row 使用 gap 时补了 grid-gap 孪生属性
+  （verify-compat 会检查）。六个套件全绿；perft(4) = 3290240。
+  线上冒烟：preferredId=XYZ234 首次建房得到 XYZ234；另一客户端抢同一码得到新码；
+  前者离开后可以重新拿到 XYZ234。
 
 部署状态：已上线（2026-10-18）
-  - /var/www/web.syjnb.top/yijian/ 的 app.js、index.html 已更新（资源版本 3.6.0-20261018）。
-  - 信令服务本次无改动，未重新部署。
+  - /opt/yijian/server.mjs 已更新并重启（支持 preferredId）。
+  - /var/www/web.syjnb.top/yijian/ 的 app.js / net.js / index.html / styles.css 已更新
+    （资源版本 3.7.0-20261018）。
+  - https://c.syjnb.top/health 返回 {"ice":2,"stun":1,"turn":2}。
 
-说明: 基于 3.5 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.6 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
