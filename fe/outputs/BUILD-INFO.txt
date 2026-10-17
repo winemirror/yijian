@@ -1,42 +1,45 @@
-弈鉴 · 3.11 构建信息（2026-10-18）
+弈鉴 · 3.12 构建信息（2026-10-18）
 
 包名: com.yijian.xiangqi
-版本: 3.11 (versionCode 40)
+版本: 3.12 (versionCode 41)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.11.apk
-文件大小: 4376725 bytes
-SHA-256: 2BB0537EF8789022AF57470BF03665A9814C0DA5D105FAD755E2A569E96E5BFC
+APK 文件: Yijian-Xiangqi-3.12.apk
+文件大小: 4376937 bytes
+SHA-256: 52746A47102D2099127EC9E38B710F076DF66A26DB4D1FC1BF02B7491F21CA05
 
 桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
 文件大小: 514560 bytes
-SHA-256: 05079FF37F79D13A72AB17D7626D56F639FDFBFD6BEA1625867B0DD3D8091AC8
+SHA-256: 2F8892F75586BD85670D18CCF3B67406E0636792E12A7D07BD3F42CF5A752D62
 
-上一版: Yijian-Xiangqi-3.10.apk
-文件大小: 4376633 bytes
-SHA-256: C02532BD09D79F837DDC74F433548FB08B2FC096F3626AF94DD3ED97A762B7BB
+上一版: Yijian-Xiangqi-3.11.apk
+文件大小: 4376725 bytes
+SHA-256: 2BB0537EF8789022AF57470BF03665A9814C0DA5D105FAD755E2A569E96E5BFC
 
-本次改动:
+本次改动: 修复翻转棋盘后无法落子
 
-1) /help 不再列出金手指
-   - CHAT_COMMANDS 里的 acesyj 标记 hidden: true；showChatCommands 本来就会跳过 hidden。
-   - /help 里不再出现 /acesyj，也不会出现【金手指】分组标题。
-   - 命令本身仍然可用（输入 /acesyj 照常开关自动下一步）。
+原因:
+  3.10 的翻转只改了「渲染」：棋子、落点、虚线都用 displayCol/displayRow 映射了；
+  但点击空格时的 pointToSquare() 仍然按未翻转的屏幕坐标换算棋盘索引。
+  于是翻转后点一个空格会落到镜像位置，state.legalMoves 找不到对应着法，
+  表现为"选中了棋子却走不出去"。
 
-2) 多人对局禁用 /engine
-   - debugEngine 开头判断 netActive()：联机（含观战）时只提示
-     「多人对局中禁用 /engine（避免用引擎分析当前局面）」并直接返回，
-     不再做任何搜索。
-   - 单机仍可用；/bench、/perft、/selftest 用的是固定局面/开局，不受影响。
+修复:
+  pointToSquare() 在算出屏幕行列后，再用同一组映射换回棋盘坐标：
+    return displayRow(row) * 9 + displayCol(col);
+  180° 旋转是对合变换（再翻一次就回来），所以渲染和点击共用同一个映射。
 
 验证:
-  verify-net 新增 2 项：/help 不含 /acesyj 与【金手指】、多人对局中 /engine 被拒绝。
+  verify-motion 新增 3 项：
+    - 未翻转时 (650,650) 反解为 60；
+    - 翻转后同一屏幕点反解为 29；
+    - 0/4/60/85 四个棋子在翻转后的显示中心都能反解回原索引。
   六个套件全绿；perft(4) = 3290240。
 
 部署状态：已上线（2026-10-18）
-  - /var/www/web.syjnb.top/yijian/ 更新 app.js / index.html（资源版本 3.11.0-20261018）。
+  - /var/www/web.syjnb.top/yijian/ 更新 app.js / index.html（资源版本 3.12.0-20261018）。
   - 服务端无改动。
 
-说明: 基于 3.10 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
+说明: 基于 3.11 继续叠加。改动落在 fe\work 工作副本，产物输出到 fe\outputs。
