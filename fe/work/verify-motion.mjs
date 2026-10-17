@@ -166,6 +166,31 @@ console.log("== board flip ==");
       && engine.__window.localStorage.getItem("xiangqi.board.flipped") === "0");
 }
 
+console.log("== move ticker ==");
+{
+  check("markup has a move ticker", html.includes('id="moveTicker"'));
+  check("ticker is horizontally scrollable",
+    /\.move-ticker\s*\{[^}]*overflow-x:\s*auto/.test(css));
+
+  engine.reset();
+  engine.state.game.play(60, 51);
+  engine.state.game.play(1, 20);
+  // 桩 DOM 的 clearChildren 不会真的清空，测试前手动清掉旧节点。
+  const tickerEl = engine.__document.getElementById("moveTicker");
+  tickerEl.children.length = 0;
+  engine.renderMoveTicker();
+  const ticker = tickerEl;
+  const items = ticker.children;
+  check("ticker lists both moves in order",
+    items.length === 2
+      && items[0].textContent === engine.state.game.history[0].notation
+      && items[1].textContent === engine.state.game.history[1].notation,
+    items.map((node) => node.textContent).join("|"));
+  check("latest move is highlighted",
+    !!items[1] && items[1].className.includes("latest")
+      && !items[0].className.includes("latest"));
+}
+
 console.log("== move trail ==");
 {
   const pieces = engine.__document.getElementById("pieces");
