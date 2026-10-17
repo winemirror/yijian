@@ -1132,6 +1132,15 @@ try {
       && helpText.includes("/diag") && helpText.includes("/bench")
       && helpText.includes("/fen"),
     helpText.slice(-200));
+  check("/help 不再列出金手指",
+    !helpText.includes("/acesyj") && !helpText.includes("【金手指】"),
+    helpText.slice(-120));
+
+  engine.netBegin("guest", RED, "乙");
+  engine.runChatCommand("engine");
+  check("多人对局中禁用 /engine",
+    chatNodes().includes("多人对局中禁用 /engine"), chatNodes().slice(-120));
+  engine.netLeave();
 
   engine.runChatCommand("debug on");
   check("/debug on 打开详细日志", engine.state.debug === true);
