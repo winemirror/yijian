@@ -26,6 +26,7 @@
   var readyPromise = null;
   var selfId = "";
   var peerId = "";
+  var activeRequestId = "";
   var nextRequestId = 1;
   var pending = new Map();
   var heartbeat = null;
@@ -58,6 +59,7 @@
       request.reject(error);
     }
     pending.clear();
+    activeRequestId = "";
   }
 
   function post(message) {
@@ -185,6 +187,7 @@
           var request = pending.get(String(data.id || ""));
           if (!request) return;
           pending.delete(String(data.id || ""));
+          if (activeRequestId === String(data.id || "")) activeRequestId = "";
           clearTimeout(request.timer);
           if (data.t === "pf.error") request.reject(new Error(data.message || "皮卡鱼请求失败"));
           else request.resolve(data);
@@ -210,6 +213,7 @@
         socket = null;
         selfId = "";
         peerId = "";
+        activeRequestId = "";
         if (heartbeat) {
           clearInterval(heartbeat);
           heartbeat = null;
@@ -230,6 +234,7 @@
           return;
         }
         var id = String(nextRequestId++);
+        activeRequestId = id;
         var timer = scope.setTimeout(function () {
           pending.delete(id);
           reject(new Error("皮卡鱼思考超时"));
@@ -275,6 +280,17 @@
     };
   }
 
+  function cancelActive() {
+    if (!peerId || !activeRequestId) return false;
+    var id = activeRequestId;
+    activeRequestId = "";
+    return post({
+      t: "signal",
+      to: peerId,
+      data: { t: "pf.cancel", id: id }
+    });
+  }
+
   function close() {
     rejectPending(new Error("皮卡鱼连接已关闭"));
     if (heartbeat) {
@@ -290,6 +306,7 @@
     readyPromise = null;
     selfId = "";
     peerId = "";
+    activeRequestId = "";
   }
 
   scope.XiangqiPikafish = {
@@ -300,6 +317,7 @@
     labelFor: labelFor,
     chooseMove: chooseMove,
     analyze: analyze,
+    cancelActive: cancelActive,
     connect: connect,
     status: status,
     close: close
