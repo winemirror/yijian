@@ -1,0 +1,4 @@
+#!/data/data/com.termux/files/usr/bin/sh
+export PIKAFISH_THREADS=4
+export PIKAFISH_HASH=256
+exec node /data/data/com.termux/files/home/pikafish-service/engine-service.mjs
