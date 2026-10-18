@@ -1,0 +1,20 @@
+#!/data/data/com.termux/files/usr/bin/sh
+
+PREFIX=/data/data/com.termux/files/usr
+export PREFIX
+export PATH="$PREFIX/bin:$PATH"
+export SVDIR="$PREFIX/var/service"
+
+termux-wake-lock
+service-daemon start >/dev/null 2>&1
+sleep 2
+
+rm -f "$SVDIR/ssh-agent/down"
+rm -f "$SVDIR/sshd/down"
+rm -f "$SVDIR/frpc/down"
+rm -f "$SVDIR/yijian-pikafish/down"
+
+sv up ssh-agent
+sv up sshd
+sv up frpc
+sv up yijian-pikafish

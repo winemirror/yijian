@@ -1,0 +1,3 @@
+#!/data/data/com.termux/files/usr/bin/sh
+cd /data/data/com.termux/files/home/frp_0.61.2_linux_arm64 || exit 1
+exec ./frpc -c frpc.toml
