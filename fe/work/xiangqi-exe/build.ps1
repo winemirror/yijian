@@ -25,6 +25,7 @@ New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
     /resource:"$(Join-Path $webRoot 'styles.css')",YiJian.styles.css `
     /resource:"$(Join-Path $webRoot 'ai-data.js')",YiJian.ai-data.js `
     /resource:"$(Join-Path $webRoot 'app.js')",YiJian.app.js `
+    /resource:"$(Join-Path $webRoot 'records.js')",YiJian.records.js `
     /resource:"$(Join-Path $webRoot 'net.js')",YiJian.net.js `
     /resource:"$(Join-Path $webRoot 'pikafish.js')",YiJian.pikafish.js `
     /resource:"$(Join-Path $webRoot 'ai-worker-bootstrap.js')",YiJian.ai-worker-bootstrap.js `

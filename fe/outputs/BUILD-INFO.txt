@@ -1,56 +1,54 @@
-弈鉴 · 3.16b 皮卡鱼测试版构建信息（2026-10-18）
+弈鉴 · 3.16b1 皮卡鱼测试版构建信息（2026-10-21）
 
 包名: com.yijian.xiangqi
-版本: 3.16b (versionCode 45)
+版本: 3.16b1 (versionCode 46)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.16b.apk
+APK 文件: Yijian-Xiangqi-3.16b1.apk
+文件大小: 4396766 bytes
+SHA-256: 740D952CEA2BCF74C42FCE228A66853CD9F27C78A6C3EB3692F46E137070E8AC
+
+桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 580096 bytes
+SHA-256: 85F49D81C95C55EDF6639E389BADCAF86DDB3C3170532B739D036E4F597BE18F
+
+上一版: Yijian-Xiangqi-3.16b.apk
 文件大小: 4465470 bytes
 SHA-256: 8D1ED1973A0506B5DAD6438BC1DD03649F18AC7BCB97E9C4C06E19B3139C49E3
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 535552 bytes
-SHA-256: 2A14D8ADC5558FE6E29DD5A46AE8E47119D57E2FBD4D1CC37FF1E2E5B75B9DC0
-
 分支: 3.16b-pikafish
-上游版本: v3.15
-资源版本: 3.16.0b5-20261018
+上游版本: v3.16b
+资源版本: 3.16.0b6-20261021
 
-本次改动:
-  - 红黑双方新增皮卡鱼快速、标准、深度三档选项。
-  - 任一方选择皮卡鱼时，对手或己方另一方仍可使用本地 AI。
-  - 新增 pikafish.js 云端引擎客户端。
-  - 对局、候选着法、赢面曲线和着法评价统一使用皮卡鱼。
-  - 若所选着法不在 MultiPV 候选内，使用落子后局面评价补齐该手评分。
-  - 手机 Termux 端新增零依赖 Pikafish 中继服务。
-  - 主 VPS 继续只做信令桥接，不在服务器执行引擎。
-  - 修正移动端顶栏的 4px 横向溢出。
-  - 修正进入复盘后旧 AI 搜索未取消、回到当前后驱动未重启的问题。
-  - 连续 AI 对战中从历史复盘返回当前局面时，自动恢复无限连续驱动。
+本次改动（第一期：本地棋谱闭环）:
+  - 新增独立 records.js 棋谱协议层与 yijian.game v2 格式。
+  - 保留 v1 JSON 导入兼容，并支持 ICCS 文本/文件导入。
+  - 棋谱保存到 IndexedDB：正文与摘要分库，列表只读取摘要。
+  - 对局结束后自动入库；也可手动保存当前进行中的棋局。
+  - 支持文件导入、文本粘贴导入、单盘导出和当前棋局导出。
+  - 新增只读复盘模式：前后翻页、点击跳转、播放/暂停和 0.5x/1x/2x。
+  - 退出复盘后恢复进入棋谱库前的实时对局、计时与 AI 连续对弈状态。
+  - 记录初始 FEN、双方身份/AI 难度、结果、杀法、每手用时与质量。
+  - 导入时从初始 FEN 逐手重放，非法着法会拒绝载入。
+  - v2 文件带 FNV-1a 完整性校验，用于发现截断或意外修改。
+  - EXE 资源清单与 Android assets 已同步加入 records.js。
 
 线上入口:
   - https://web.syjnb.top/yijian-test/
-  - https://web.syjnb.top/post/yijian-pikafish-test/
-  - https://web.syjnb.top/downloads/Yijian-Xiangqi-3.16b.apk
-
-计算节点:
-  - Termux / Android 16 / aarch64
-  - Pikafish 2026-09-06
-  - 中继房间 PKAFST
-  - 客户端以观战连接共享节点，引擎请求由单进程队列串行执行
-  - 当前运行参数 Threads=4、Hash=256 MiB
+  - https://web.syjnb.top/downloads/Yijian-Xiangqi-3.16b1.apk
 
 验证:
-  - 线上玩家对皮卡鱼、本地 AI 对皮卡鱼、连续 AI 对战均通过。
-  - WSS 中继实测返回 Pikafish 着法和 3 条 MultiPV 分析。
-  - verify-pikafish、verify-compat、verify-motion、verify-mate、
-    verify-styles、verify-net 全部通过。
-  - perft(1..4)=44 / 1920 / 79666 / 3290240。
-  - APK versionName=3.16b、versionCode=45，签名与 1.5 一致。
+  - verify-records：v2 导出、v1/ICCS 导入、重放重建、非法着法拦截。
+  - verify-records-browser：IndexedDB 保存、文本导入、只读复盘、
+    自动入库、退出恢复，以及 1280px/390px 布局，无运行时异常。
+  - verify-motion、verify-styles、verify-mate、verify-compat、verify-net、
+    server/verify-server 全部通过。
+  - perft(4)=3290240。
+  - APK versionName=3.16b1、versionCode=46，签名与 1.5 一致。
 
-说明:
-  - 这是独立测试分支，不合并 main。
-  - 皮卡鱼节点当前依赖 Termux 进程持续运行。
-  - 测试版可能单独调整或下线。
+边界:
+  - 本期仅完成账号/云端之前的第一期本地闭环，不上传棋谱。
+  - 账号注册、云端同步、分享与跨设备恢复属于第二期。
+  - 这是独立皮卡鱼测试分支，不合并 main。
