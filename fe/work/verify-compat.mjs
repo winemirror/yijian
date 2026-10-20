@@ -12,6 +12,7 @@ const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z
 const read = (name) => fs.readFileSync(path.join(here, name), "utf8");
 
 const app = read("www/app.js");
+const records = read("www/records.js");
 const css = read("www/styles.css");
 const html = read("www/index.html");
 const launcher = fs.readFileSync(
@@ -97,11 +98,17 @@ console.log("== android p1: css fallbacks ==");
 console.log("== android p2: modern syntax + flex gap ==");
 {
   const code = app.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
-  check("no optional chaining", !/\?\./.test(code));
-  check("no nullish coalescing", !/\?\?/.test(code));
-  check("no Array.prototype.at", !/\.at\(/.test(code));
-  check("no replaceChildren", !/replaceChildren/.test(code));
+  const recordCode = records.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const combined = code + "\n" + recordCode;
+  check("no optional chaining", !/\?\./.test(combined));
+  check("no nullish coalescing", !/\?\?/.test(combined));
+  check("no Array.prototype.at", !/\.at\(/.test(combined));
+  check("no replaceChildren", !/replaceChildren/.test(combined));
   check("app.js parses at ES2017 or lower", parseAt(app, 2017));
+  check("records.js parses at ES2017 or lower", parseAt(records, 2017));
+  check("records.js loads before app.js",
+    html.indexOf('src="records.js') > 0
+    && html.indexOf('src="records.js') < html.indexOf('src="app.js'));
 
   check("every remaining gap has a grid-gap twin", (() => {
     for (const block of cssBlocks(css)) {
@@ -151,6 +158,10 @@ console.log("== windows c: diagnostics ==");
 console.log("== launcher source encoding ==");
 {
   check("compiler reads the source as utf-8", /\/codepage:65001/.test(buildScript));
+  check("EXE embeds records.js",
+    /YiJian\.records\.js/.test(buildScript)
+    && /YiJian\.records\.js/.test(launcher)
+    && /"records\.js"/.test(launcher));
 }
 
 console.log("");

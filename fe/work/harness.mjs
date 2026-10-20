@@ -140,6 +140,10 @@ export function loadEngine(jsPath, aiDataPath = AI_DATA_PATH, options = {}) {
   if (typeof options.beforeEngine === "function") {
     options.beforeEngine(sandbox, win);
   }
+  const recordsPath = path.join(path.dirname(jsPath), "records.js");
+  if (fs.existsSync(recordsPath)) {
+    vm.runInContext(fs.readFileSync(recordsPath, "utf8"), sandbox, { filename: recordsPath });
+  }
   vm.runInContext(fs.readFileSync(jsPath, "utf8"), sandbox, { filename: jsPath });
 
   const api = win.XiangqiLocal;

@@ -39,6 +39,7 @@ internal static class Launcher
             WriteResource(appRoot, "YiJian.styles.css", "styles.css");
             WriteResource(appRoot, "YiJian.ai-data.js", "ai-data.js");
             WriteResource(appRoot, "YiJian.app.js", "app.js");
+            WriteResource(appRoot, "YiJian.records.js", "records.js");
             WriteResource(appRoot, "YiJian.net.js", "net.js");
             WriteResource(appRoot, "YiJian.pikafish.js", "pikafish.js");
             WriteResource(appRoot, "YiJian.ai-worker-bootstrap.js", "ai-worker-bootstrap.js");
