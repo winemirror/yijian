@@ -12,9 +12,7 @@ sleep 2
 rm -f "$SVDIR/ssh-agent/down"
 rm -f "$SVDIR/sshd/down"
 rm -f "$SVDIR/frpc/down"
-rm -f "$SVDIR/yijian-pikafish/down"
 
 sv up ssh-agent
 sv up sshd
 sv up frpc
-sv up yijian-pikafish

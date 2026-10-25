@@ -17,3 +17,38 @@ Run:
 ```sh
 node engine-service.mjs
 ```
+
+## Home server deployment
+
+The home-server package uses a dedicated Node 24 runtime and the official
+Linux x86-64 Pikafish build. The service files are under `deploy/`:
+
+- `install-server.sh`: installs the runtime, engine, NNUE and systemd unit.
+- `yijian-pikafish.service`: runs as `yijian-pikafish`, joins room `PKAFST`,
+  uses 8 threads and a 1 GiB transposition table, and restarts on failure.
+
+The installer expects its payload in `/root/yijian-pikafish-deploy`:
+
+```text
+node.tar.xz
+engine-service.mjs
+Pikafish-Linux-x86-64-universal
+pikafish.nnue
+Copying.txt
+NNUE-License.md
+yijian-pikafish.service
+```
+
+Install and start:
+
+```sh
+sh /root/yijian-pikafish-deploy/install-server.sh
+systemctl start yijian-pikafish.service
+systemctl status yijian-pikafish.service
+```
+
+Verify the live relay from the development workstation:
+
+```powershell
+node work\pikafish-engine\verify-relay.mjs
+```

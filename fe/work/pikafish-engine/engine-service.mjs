@@ -12,7 +12,8 @@ const SIGNAL_URL = process.env.PIKAFISH_SIGNAL_URL || "wss://c.syjnb.top/ws";
 const ROOM_ID = (process.env.PIKAFISH_ROOM || "PKAFST").toUpperCase();
 const THREADS = clamp(Number(process.env.PIKAFISH_THREADS || 4), 1, 8);
 const HASH_MB = clamp(Number(process.env.PIKAFISH_HASH || 256), 16, 1024);
-const LOG_PATH = path.join(HOME, "pikafish", "engine-service.log");
+const LOG_PATH =
+  process.env.PIKAFISH_LOG_PATH || path.join(HOME, "pikafish", "engine-service.log");
 
 function clamp(value, min, max) {
   if (!Number.isFinite(value)) return min;

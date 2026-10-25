@@ -1,0 +1,42 @@
+[Unit]
+Description=YiJian Pikafish relay service
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=yijian-pikafish
+Group=yijian-pikafish
+WorkingDirectory=/opt/yijian-pikafish
+Environment=HOME=/var/lib/yijian-pikafish
+Environment=PIKAFISH_BIN=/opt/yijian-pikafish/pikafish/Pikafish-Linux-x86-64-universal
+Environment=PIKAFISH_SIGNAL_URL=wss://c.syjnb.top/ws
+Environment=PIKAFISH_ROOM=PKAFST
+Environment=PIKAFISH_THREADS=8
+Environment=PIKAFISH_HASH=1024
+Environment=PIKAFISH_LOG_PATH=/var/log/yijian-pikafish/engine-service.log
+ExecStart=/opt/yijian-pikafish/node/bin/node /opt/yijian-pikafish/engine-service.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+LogsDirectory=yijian-pikafish
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryHigh=4G
+MemoryMax=6G
+TasksMax=512
+LimitNOFILE=65536
+OOMPolicy=stop
+
+[Install]
+WantedBy=multi-user.target
