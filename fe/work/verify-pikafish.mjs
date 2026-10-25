@@ -18,7 +18,7 @@ function check(label, ok) {
 }
 
 console.log("== pikafish 3.16b ==");
-check("page is marked 3.16b", html.includes("3.16.0b5-20261018"));
+check("page is marked 3.16b", /3\.16\.0b\d+-2026\d{4}/.test(html));
 check("pikafish client is loaded before app", html.indexOf("pikafish.js") < html.lastIndexOf("app.js"));
 check("both sides expose three cloud levels", (html.match(/pikafish:(fast|standard|deep)/g) || []).length === 6);
 check("setup parser accepts pikafish levels", app.includes('value.startsWith("pikafish:")'));

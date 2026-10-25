@@ -1,0 +1,11 @@
+#!/data/data/com.termux/files/usr/bin/sh
+
+PREFIX=/data/data/com.termux/files/usr
+export PREFIX
+export PATH="$PREFIX/bin:$PATH"
+export SVDIR="$PREFIX/var/service"
+
+mkdir -p "$SVDIR/yijian-pikafish"
+touch "$SVDIR/yijian-pikafish/down"
+sv down yijian-pikafish 2>/dev/null || true
+sv status yijian-pikafish 2>/dev/null || true
