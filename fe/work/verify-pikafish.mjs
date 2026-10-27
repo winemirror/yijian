@@ -32,6 +32,7 @@ check("returning live restarts the AI driver", app.includes("function resumeLive
 check("continuous playback keeps infinite moves", app.includes("if (state.playing && aiTurn) runAIDriver()"));
 check("client can cancel the active cloud request", client.includes("function cancelActive()"));
 check("relay service handles cancellation", service.includes('data.t === "pf.cancel"') && service.includes("function cancelRequest"));
+check("relay keeps the most recent 240 moves", service.includes(".slice(-240)"));
 check("relay room code is valid", client.includes('"PKAFST"') && service.includes('"PKAFST"'));
 check("relay service keeps the server compute-free", service.includes("wss://c.syjnb.top/ws"));
 check("permanent build has no test labels",

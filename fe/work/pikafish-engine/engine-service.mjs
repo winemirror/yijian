@@ -224,7 +224,7 @@ function normalizeMoves(value) {
   return value
     .map((move) => String(move || "").toLowerCase())
     .filter((move) => /^[a-i][0-9][a-i][0-9]$/.test(move))
-    .slice(0, 240);
+    .slice(-240);
 }
 
 async function handleEngineRequest(message) {
