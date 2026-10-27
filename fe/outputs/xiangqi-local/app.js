@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.18.0-20261028";
+  const APP_ASSET_VERSION = "3.19.0-20261028";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2051,6 +2051,37 @@
     return pool[0].move;
   }
 
+  const QUALITY_TERMS = {
+    "最佳": "正着",
+    "神准": "妙手",
+    "优秀": "好着",
+    "良好": "正着",
+    "稳健": "稳着",
+    "一般": "俗手",
+    "欠佳": "软招",
+    "失误": "无理手",
+    "严重失误": "漏招",
+    "败着": "恶手"
+  };
+
+  function qualityDisplayLabel(quality) {
+    if (!quality) return "";
+    return quality.term || QUALITY_TERMS[quality.label] || quality.label || "";
+  }
+
+  function sideWinRate(winRed, side) {
+    return side === RED ? winRed : 100 - winRed;
+  }
+
+  function isBrilliantMove(record) {
+    if (!record || !record.analysis || !record.afterAnalysis || !record.quality) return false;
+    if (!["最佳", "神准", "优秀"].includes(record.quality.label)) return false;
+    const before = sideWinRate(Number(record.analysis.winRed), record.side);
+    const after = sideWinRate(Number(record.afterAnalysis.winRed), record.side);
+    if (!isFinite(before) || !isFinite(after)) return false;
+    return before < 50 && after >= 65 && after - before >= 25;
+  }
+
   function qualityForRecord(record, analysis) {
     if (!analysis || !analysis.candidates.length) {
       return {
@@ -2136,6 +2167,7 @@
     return {
       score,
       label,
+      term: QUALITY_TERMS[label] || label,
       detail,
       css,
       bestRate,
@@ -2549,6 +2581,8 @@
     moveLine: document.getElementById("moveLine"),
     resultBanner: document.getElementById("resultBanner"),
     resultBannerText: document.getElementById("resultBannerText"),
+    brilliantBanner: document.getElementById("brilliantBanner"),
+    brilliantBannerText: document.getElementById("brilliantBannerText"),
     pieces: document.getElementById("pieces"),
     moveHints: document.getElementById("moveHints"),
     thinking: document.getElementById("thinking"),
@@ -2710,6 +2744,7 @@
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let allowAnimation = !prefersReducedMotion;
   let aiDriverToken = 0;
+  let brilliantBannerTimer = 0;
 
   // Optional LAN layer. It stays null in plain browsers and inside the test
   // harness, which disables the multiplayer entry points without touching any
@@ -3477,6 +3512,33 @@
     elements.moveCounter.textContent = `第 ${Math.max(1, Math.ceil(currentPly() / 2))} 回合`;
   }
 
+  function hideBrilliantBanner() {
+    if (brilliantBannerTimer) {
+      window.clearTimeout(brilliantBannerTimer);
+      brilliantBannerTimer = 0;
+    }
+    if (!elements.brilliantBanner) return;
+    elements.brilliantBanner.hidden = true;
+    elements.brilliantBanner.classList.remove("show");
+  }
+
+  function showBrilliantBanner(side) {
+    const banner = elements.brilliantBanner;
+    const label = elements.brilliantBannerText;
+    if (!banner || !label) return;
+    if (brilliantBannerTimer) window.clearTimeout(brilliantBannerTimer);
+    label.textContent = `${side === RED ? "红方" : "黑方"}妙手`;
+    banner.hidden = false;
+    banner.classList.remove("show");
+    void banner.offsetWidth;
+    banner.classList.add("show");
+    brilliantBannerTimer = window.setTimeout(() => {
+      brilliantBannerTimer = 0;
+      banner.hidden = true;
+      banner.classList.remove("show");
+    }, 3200);
+  }
+
   // Victory banner. It appears the moment a side wins and is cleared by the
   // next render of an unfinished game, i.e. after 新对局 or 悔棋.
   function renderResultBanner() {
@@ -3532,7 +3594,9 @@
       : "--";
     elements.avgLoss.textContent = averageLoss === null ? "--" : `${averageLoss.toFixed(1)} pp`;
     elements.mistakeCount.textContent = analyzed.length ? String(mistakes) : "--";
-    elements.currentQuality.textContent = currentQuality ? currentQuality.label : "--";
+    elements.currentQuality.textContent = currentQuality
+      ? qualityDisplayLabel(currentQuality)
+      : "--";
     elements.currentQuality.style.color = currentQuality ? qualityColor(currentQuality) : "";
 
     if (!currentRecord) {
@@ -3549,7 +3613,7 @@
       } else {
         elements.moveVerdict.className = `verdict ${quality.css}`;
         elements.moveVerdict.innerHTML = `
-          <strong>${quality.label} · ${quality.score.toFixed(0)} 分</strong>
+          <strong>${qualityDisplayLabel(quality)} · ${quality.score.toFixed(0)} 分</strong>
           <span>${quality.detail}</span>
         `;
       }
@@ -3651,7 +3715,7 @@
   }
 
   function moveCell(record, index) {
-    const quality = record.quality ? record.quality.label : "待分析";
+    const quality = record.quality ? qualityDisplayLabel(record.quality) : "待分析";
     const timing = record.moveTimeMs ? ` · ${formatClock(record.moveTimeMs)}` : "";
     return `
       <div class="move-cell ${record.side === RED ? "red-side" : "black-side"}" data-ply="${index + 1}">
@@ -3763,6 +3827,14 @@
       record.winRedAfter = defaultTo(record.chosen && record.chosen.winRed, analysis.winRed);
       record.evalRedAfter = defaultTo(record.chosen && record.chosen.evalRed, analysis.evalRed);
       record.quality = qualityForRecord(record, analysis);
+      if (
+        !state.replay.active
+        && state.live
+        && record.index === state.game.history.length - 1
+        && isBrilliantMove(record)
+      ) {
+        showBrilliantBanner(record.side);
+      }
     } catch (error) {
       document.documentElement.dataset.pikafishError =
         (error && error.message) || String(error);
@@ -4005,6 +4077,7 @@
   }
 
   function resetGame(options = {}) {
+    hideBrilliantBanner();
     discardRecordReplay();
     state.session += 1;
     aiDriverToken += 1;
@@ -4036,6 +4109,7 @@
   }
 
   function undo(options = {}) {
+    hideBrilliantBanner();
     if (state.replay.active) {
       setStatus("复盘模式不能悔棋");
       return;
@@ -6552,6 +6626,12 @@
     updateClocks,
     markMoveTiming,
     renderMoveList,
+    QUALITY_TERMS,
+    qualityDisplayLabel,
+    qualityForRecord,
+    isBrilliantMove,
+    showBrilliantBanner,
+    hideBrilliantBanner,
     classifyMate,
     MATE_PATTERNS,
     isInCheck,
