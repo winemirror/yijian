@@ -116,7 +116,7 @@
       }
 
       socket.onopen = function () {
-        post({ t: "hello", proto: 1, name: "皮卡鱼测试客户端" });
+        post({ t: "hello", proto: 1, name: "弈鉴皮卡鱼客户端" });
       };
 
       socket.onmessage = function (event) {
@@ -172,7 +172,7 @@
 
         if (message.t === "room.closed") {
           peerId = "";
-          failReady(new Error("皮卡鱼测试房间已关闭"));
+          failReady(new Error("皮卡鱼常驻房间已关闭"));
           try {
             if (socket) socket.close();
           } catch (error) {
@@ -230,7 +230,7 @@
     return connect().then(function () {
       return new Promise(function (resolve, reject) {
         if (!peerId) {
-          reject(new Error("皮卡鱼测试节点不在线"));
+          reject(new Error("皮卡鱼常驻节点不在线"));
           return;
         }
         var id = String(nextRequestId++);
