@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="弈鉴">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>弈鉴 3.16b · 皮卡鱼测试版</title>
+  <title>弈鉴 3.18 · 中国象棋</title>
   <script>
     /* Compatibility guard. Runs before any modern syntax is parsed, so an old
        WebView shows a readable message instead of a blank white page. This
@@ -88,7 +88,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=3.16.0b5-20261018">
+  <link rel="stylesheet" href="styles.css?v=3.18.0-20261028">
 </head>
 <body>
   <noscript>
@@ -102,7 +102,7 @@
         <div class="brand-mark">弈</div>
         <div>
           <h1>弈鉴</h1>
-          <p>本地中国象棋 · 皮卡鱼测试版</p>
+          <p>本地中国象棋 · 人机对弈与复盘</p>
         </div>
       </div>
 
@@ -116,9 +116,9 @@
             <option value="ai:medium">AI · 初级</option>
             <option value="ai:hard">AI · 中级</option>
             <option value="ai:master">AI · 高级</option>
-            <option value="pikafish:fast">皮卡鱼 · 快速（云端）</option>
-            <option value="pikafish:standard">皮卡鱼 · 标准（云端）</option>
-            <option value="pikafish:deep">皮卡鱼 · 深度（云端）</option>
+            <option value="pikafish:fast">皮卡鱼 · 快速</option>
+            <option value="pikafish:standard">皮卡鱼 · 标准</option>
+            <option value="pikafish:deep">皮卡鱼 · 深度</option>
             <option value="ai:idiot">AI · 瞎几把下</option>
           </select>
         </label>
@@ -131,9 +131,9 @@
             <option value="ai:medium" selected>AI · 初级</option>
             <option value="ai:hard">AI · 中级</option>
             <option value="ai:master">AI · 高级</option>
-            <option value="pikafish:fast">皮卡鱼 · 快速（云端）</option>
-            <option value="pikafish:standard">皮卡鱼 · 标准（云端）</option>
-            <option value="pikafish:deep">皮卡鱼 · 深度（云端）</option>
+            <option value="pikafish:fast">皮卡鱼 · 快速</option>
+            <option value="pikafish:standard">皮卡鱼 · 标准</option>
+            <option value="pikafish:deep">皮卡鱼 · 深度</option>
             <option value="ai:idiot">AI · 瞎几把下</option>
           </select>
         </label>
@@ -250,6 +250,7 @@
         <div class="tabs" role="tablist">
           <button class="tab active" data-tab="analysis" type="button">分析</button>
           <button class="tab" data-tab="review" type="button">复盘</button>
+          <button class="tab" data-tab="records" type="button">棋谱</button>
           <button class="tab" data-tab="chat" type="button">聊天</button>
           <button class="tab" data-tab="net" type="button">联机</button>
         </div>
@@ -318,8 +319,53 @@
             <button id="lastMove" class="icon-btn" type="button" title="回到最后" aria-label="回到最后">&gt;|</button>
             <button id="liveMode" class="btn small" type="button">回到当前</button>
           </div>
+          <div id="replayNotice" class="replay-notice" hidden>
+            <div>
+              <strong id="replayTitle">棋谱复盘</strong>
+              <span id="replayPosition">第 0 / 0 手</span>
+            </div>
+            <div class="replay-actions">
+              <button id="replayPlay" class="btn small primary" type="button">播放</button>
+              <select id="replaySpeed" aria-label="复盘播放速度">
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+              </select>
+              <button id="replayExit" class="btn small" type="button">退出复盘</button>
+            </div>
+          </div>
           <div id="moveList" class="move-list">
             <div class="empty-state">对局开始后，这里会显示棋谱和逐步分析。</div>
+          </div>
+        </section>
+
+        <section id="panel-records" class="panel" aria-label="棋谱库面板">
+          <div class="section-block record-import-block">
+            <div class="section-head">
+              <h2>本地棋谱</h2>
+              <span id="recordCount">0 盘</span>
+            </div>
+            <div class="record-actions">
+              <button id="recordSaveCurrent" class="btn small primary" type="button">保存当前</button>
+              <button id="recordExportCurrent" class="btn small" type="button">导出当前</button>
+              <button id="recordImportFile" class="btn small" type="button">导入文件</button>
+              <input id="recordFile" type="file" accept=".json,.txt,.iccs,application/json,text/plain" hidden>
+            </div>
+            <textarea id="recordImportText" class="record-import-text" placeholder="粘贴 yijian.game JSON 或 ICCS 着法"></textarea>
+            <div class="record-import-actions">
+              <button id="recordImportTextButton" class="btn small" type="button">导入文本</button>
+              <button id="recordClearText" class="btn small" type="button">清空</button>
+            </div>
+            <div id="recordStatus" class="record-status" role="status"></div>
+          </div>
+          <div class="section-block record-library-block">
+            <div class="section-head">
+              <h2>棋谱库</h2>
+              <span>IndexedDB · 仅本机</span>
+            </div>
+            <div id="recordList" class="record-list">
+              <div class="empty-state">还没有保存的棋谱。</div>
+            </div>
           </div>
         </section>
 
@@ -429,9 +475,10 @@
     </main>
   </div>
 
-  <script src="ai-data.js?v=3.16.0b5-20261018"></script>
-  <script src="net.js?v=3.16.0b5-20261018"></script>
-  <script src="pikafish.js?v=3.16.0b5-20261018"></script>
-  <script src="app.js?v=3.16.0b5-20261018"></script>
+  <script src="ai-data.js?v=3.18.0-20261028"></script>
+  <script src="net.js?v=3.18.0-20261028"></script>
+  <script src="pikafish.js?v=3.18.0-20261028"></script>
+  <script src="records.js?v=3.18.0-20261028"></script>
+  <script src="app.js?v=3.18.0-20261028"></script>
 </body>
 </html>

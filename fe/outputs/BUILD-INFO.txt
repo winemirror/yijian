@@ -1,54 +1,55 @@
-弈鉴 · 3.16b1 皮卡鱼测试版构建信息（2026-10-21）
+弈鉴 · 3.18 正式版构建信息（2026-10-28）
 
 包名: com.yijian.xiangqi
-版本: 3.16b1 (versionCode 46)
+版本: 3.18 (versionCode 47)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.16b1.apk
-文件大小: 4396766 bytes
-SHA-256: 740D952CEA2BCF74C42FCE228A66853CD9F27C78A6C3EB3692F46E137070E8AC
+APK 文件: Yijian-Xiangqi-3.18.apk
+文件大小: 4396754 bytes
+SHA-256: 3E6A324C780A792C6062C87FA7C20675FA60588494502935190716279D6DCD2E
 
 桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
 文件大小: 580096 bytes
-SHA-256: 85F49D81C95C55EDF6639E389BADCAF86DDB3C3170532B739D036E4F597BE18F
+SHA-256: 20F9317540EB42208F201E308F923A962AAA9D9F8084F52314B13ACDF5310384
 
-上一版: Yijian-Xiangqi-3.16b.apk
-文件大小: 4465470 bytes
-SHA-256: 8D1ED1973A0506B5DAD6438BC1DD03649F18AC7BCB97E9C4C06E19B3139C49E3
+上一正式版: Yijian-Xiangqi-3.15.apk
+上一测试版: Yijian-Xiangqi-3.16b1.apk
+分支: main
+资源版本: 3.18.0-20261028
 
-分支: 3.16b-pikafish
-上游版本: v3.16b
-资源版本: 3.16.0b6-20261021
-
-本次改动（第一期：本地棋谱闭环）:
-  - 新增独立 records.js 棋谱协议层与 yijian.game v2 格式。
-  - 保留 v1 JSON 导入兼容，并支持 ICCS 文本/文件导入。
-  - 棋谱保存到 IndexedDB：正文与摘要分库，列表只读取摘要。
-  - 对局结束后自动入库；也可手动保存当前进行中的棋局。
-  - 支持文件导入、文本粘贴导入、单盘导出和当前棋局导出。
-  - 新增只读复盘模式：前后翻页、点击跳转、播放/暂停和 0.5x/1x/2x。
-  - 退出复盘后恢复进入棋谱库前的实时对局、计时与 AI 连续对弈状态。
-  - 记录初始 FEN、双方身份/AI 难度、结果、杀法、每手用时与质量。
-  - 导入时从初始 FEN 逐手重放，非法着法会拒绝载入。
-  - v2 文件带 FNV-1a 完整性校验，用于发现截断或意外修改。
-  - EXE 资源清单与 Android assets 已同步加入 records.js。
+本次改动:
+  - 皮卡鱼从手机测试节点迁移到家庭服务器 syj-sever 常驻运行。
+  - systemd 服务 yijian-pikafish.service 使用 8 线程、1 GiB 置换表。
+  - 客户端与常驻节点的测试标识全部移除，固定使用 PKAFST 房间。
+  - 本地棋谱库、v2 棋谱、导入导出与只读复盘进入正式版。
+  - 旧 /yijian-test/ 应用入口改为跳转 /yijian/。
+  - 旧皮卡鱼测试文章跳转到 3.18 发布页，旧测试 APK 下线。
+  - 完成新版博客发布页《弈鉴 3.18：皮卡鱼常驻服务正式上线》。
 
 线上入口:
-  - https://web.syjnb.top/yijian-test/
-  - https://web.syjnb.top/downloads/Yijian-Xiangqi-3.16b1.apk
+  - https://syjnb.top/yijian/
+  - https://syjnb.top/post/yijian-3-18/
+  - https://syjnb.top/downloads/Yijian-Xiangqi-3.18.apk
+  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.18.exe
+
+皮卡鱼常驻节点:
+  - 主机: syj-sever
+  - 引擎: Pikafish 2026-09-06 Linux x86-64
+  - 服务: yijian-pikafish.service，active/enabled
+  - 参数: Threads=8，Hash=1024 MiB
+  - 固定房间: PKAFST
+  - 当前健康检查: rooms=1
 
 验证:
-  - verify-records：v2 导出、v1/ICCS 导入、重放重建、非法着法拦截。
-  - verify-records-browser：IndexedDB 保存、文本导入、只读复盘、
-    自动入库、退出恢复，以及 1280px/390px 布局，无运行时异常。
+  - verify-pikafish: 通过，正式版无测试标识。
+  - verify-records: v2、v1、ICCS、重放和非法着法拦截通过。
+  - verify-records-browser: 线上版 IndexedDB、导入、复盘和 390px 布局通过。
+  - 常驻皮卡鱼真实走子: PASS b2e2 Pikafish 2026-09-06。
+  - 常驻皮卡鱼三路分析: PASS candidates=3 best=b9c7。
   - verify-motion、verify-styles、verify-mate、verify-compat、verify-net、
     server/verify-server 全部通过。
-  - perft(4)=3290240。
-  - APK versionName=3.16b1、versionCode=46，签名与 1.5 一致。
+  - APK versionName=3.18、versionCode=47，签名与 1.5 一致。
 
-边界:
-  - 本期仅完成账号/云端之前的第一期本地闭环，不上传棋谱。
-  - 账号注册、云端同步、分享与跨设备恢复属于第二期。
-  - 这是独立皮卡鱼测试分支，不合并 main。
+说明: 3.16b/3.16b1 测试分支保留在 Git 历史中，但线上测试入口和测试包已下线。

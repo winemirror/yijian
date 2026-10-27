@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.16.0b5-20261018";
+  const APP_ASSET_VERSION = "3.18.0-20261028";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2155,8 +2155,8 @@
     return `${record.moveNumber}. ${record.side === RED ? "" : "…"}${record.notation}`;
   }
 
-  function positionAtPly(history, ply) {
-    let board = cloneBoard(INITIAL_POSITION);
+  function positionAtPly(history, ply, initialBoard) {
+    let board = cloneBoard(initialBoard || INITIAL_POSITION);
     for (let index = 0; index < ply; index += 1) {
       board = applyMove(board, history[index]).board;
     }
@@ -2591,6 +2591,22 @@
     nextMove: document.getElementById("nextMove"),
     lastMove: document.getElementById("lastMove"),
     liveMode: document.getElementById("liveMode"),
+    replayNotice: document.getElementById("replayNotice"),
+    replayTitle: document.getElementById("replayTitle"),
+    replayPosition: document.getElementById("replayPosition"),
+    replayPlay: document.getElementById("replayPlay"),
+    replaySpeed: document.getElementById("replaySpeed"),
+    replayExit: document.getElementById("replayExit"),
+    recordCount: document.getElementById("recordCount"),
+    recordSaveCurrent: document.getElementById("recordSaveCurrent"),
+    recordExportCurrent: document.getElementById("recordExportCurrent"),
+    recordImportFile: document.getElementById("recordImportFile"),
+    recordFile: document.getElementById("recordFile"),
+    recordImportText: document.getElementById("recordImportText"),
+    recordImportTextButton: document.getElementById("recordImportTextButton"),
+    recordClearText: document.getElementById("recordClearText"),
+    recordStatus: document.getElementById("recordStatus"),
+    recordList: document.getElementById("recordList"),
     chatLog: document.getElementById("chatLog"),
     chatForm: document.getElementById("chatForm"),
     chatInput: document.getElementById("chatInput"),
@@ -2646,6 +2662,11 @@
     autoSpeed: "normal",
     pieceColors: { red: "#8b0000", black: "#1f1d1a" },
     moveLineHidden: false,
+    initialFen: "",
+    initialBoard: cloneBoard(INITIAL_POSITION),
+    initialSide: RED,
+    gameId: "",
+    finishedRecordQueued: false,
     startedAt: 0,
     turnStartedAt: 0,
     endedAt: 0,
@@ -2654,6 +2675,14 @@
     // 棋盘翻转：true 时黑方在下（坐标 180° 旋转）。
     flipped: false,
     session: 0,
+    replay: {
+      active: false,
+      record: null,
+      backup: null,
+      playing: false,
+      speed: 1,
+      timer: 0
+    },
     // LAN multiplayer. Inactive until a room is joined or hosted, so the
     // single-player paths below stay exactly as they were.
     net: {
@@ -2687,6 +2716,7 @@
   // of the single-player paths.
   const Net = (typeof window !== "undefined" && window.XiangqiNet) || null;
   const Pikafish = (typeof window !== "undefined" && window.XiangqiPikafish) || null;
+  const Records = (typeof window !== "undefined" && window.XiangqiRecords) || null;
 
   function moveToUci(move) {
     const square = (index) => `${FILES[index % 9]}${9 - Math.floor(index / 9)}`;
@@ -2899,6 +2929,17 @@
 
   function updateClocks() {
     if (!elements.gameClock || !elements.turnClock) return;
+    if (state.replay.active && state.replay.record) {
+      const record = state.replay.record;
+      const ply = currentPly();
+      const moveRecord = ply > 0 ? state.game.history[ply - 1] : null;
+      const duration = record.clocks && typeof record.clocks.durationMs === "number"
+        ? record.clocks.durationMs
+        : state.game.history.reduce((sum, move) => sum + (move.moveTimeMs || 0), 0);
+      elements.gameClock.textContent = `本局 ${formatClock(duration)}`;
+      elements.turnClock.textContent = `本手 ${formatClock(moveRecord ? moveRecord.moveTimeMs || 0 : 0)}`;
+      return;
+    }
     const now = Date.now();
     const ongoing = state.game.result.type === "ongoing";
     const last = lastOf(state.game.history);
@@ -3006,7 +3047,7 @@
 
   function currentBoard() {
     if (state.live) return state.game.board;
-    return positionAtPly(state.game.history, state.reviewPly);
+    return positionAtPly(state.game.history, state.reviewPly, state.initialBoard);
   }
 
   function currentPly() {
@@ -3056,6 +3097,8 @@
     updateClocks();
     renderMoveTicker();
     updateSoundButton();
+    renderReplayNotice();
+    queueFinishedRecord();
   }
 
   function captureCapturedGhost(from, to) {
@@ -3171,6 +3214,11 @@
   }
 
   function renderLabels() {
+    if (state.replay.active && state.replay.record) {
+      elements.redLabel.textContent = state.replay.record.players.red.name;
+      elements.blackLabel.textContent = state.replay.record.players.black.name;
+      return;
+    }
     // While a room is open the two selects are managed by enter/exitNetSetup,
     // so a plain render must not write the single-player values back into them.
     if (!state.net.inRoom) {
@@ -3332,7 +3380,8 @@
     const ply = currentPly();
     const history = state.game.history.slice(0, ply);
     const last = history[history.length - 1];
-    const signature = `${ply}|${last ? `${last.from}-${last.to}` : ""}`;
+    const signature = `${state.replay.active && state.replay.record ? state.replay.record.id : ""}`
+      + `|${ply}|${last ? `${last.from}-${last.to}` : ""}`;
     // 没有新着法就不重建，避免把用户手动翻看的位置拉回最右。
     if (signature === moveTickerSignature) return;
     moveTickerSignature = signature;
@@ -3369,7 +3418,8 @@
   function renderCaptured() {
     const capturedByRed = [];
     const capturedByBlack = [];
-    for (const record of state.game.history) {
+    const records = state.game.history.slice(0, currentPly());
+    for (const record of records) {
       if (!record.captured) continue;
       if (record.side === RED) capturedByRed.push(record.captured);
       else capturedByBlack.push(record.captured);
@@ -3387,6 +3437,15 @@
 
   function renderStatus() {
     const result = state.game.result;
+    if (state.replay.active) {
+      const ply = currentPly();
+      const total = state.game.history.length;
+      elements.turnBadge.textContent = "棋谱复盘";
+      elements.turnBadge.className = "turn-badge";
+      setStatus(ply >= total ? "复盘已到最后一手" : `复盘到第 ${ply} 手（只读）`);
+      elements.moveCounter.textContent = `第 ${Math.max(1, Math.ceil(ply / 2))} 回合`;
+      return;
+    }
     if (result.type !== "ongoing") {
       elements.turnBadge.textContent = result.type === "draw" ? "和棋" : "对局结束";
       elements.turnBadge.className = "turn-badge over";
@@ -3425,7 +3484,8 @@
     const label = elements.resultBannerText;
     if (!banner || !label) return;
     const result = state.game.result;
-    if (result.type !== "win" || !result.winner) {
+    if (result.type !== "win" || !result.winner
+      || (state.replay.active && currentPly() < state.game.history.length)) {
       banner.hidden = true;
       label.textContent = "";
       return;
@@ -3661,7 +3721,11 @@
     try {
       const beforeLevel = levels.before || ANALYSIS_LEVEL;
       const afterLevel = levels.after || CURRENT_ANALYSIS_LEVEL;
-      const boardBefore = positionAtPly(state.game.history, record.index);
+      const boardBefore = positionAtPly(
+        state.game.history,
+        record.index,
+        state.initialBoard
+      );
       const beforeHistory = historyToUci(state.game.history, record.index);
       const analysis = await analyzePositionScheduled(
         boardBefore,
@@ -3670,7 +3734,11 @@
         beforeHistory
       );
       record.analysis = analysis;
-      const boardAfter = positionAtPly(state.game.history, record.index + 1);
+      const boardAfter = positionAtPly(
+        state.game.history,
+        record.index + 1,
+        state.initialBoard
+      );
       const sideAfter = opposite(record.side);
       const afterHistory = historyToUci(state.game.history, record.index + 1);
       record.afterAnalysis = await analyzePositionScheduled(
@@ -3768,7 +3836,8 @@
   function updateAutoStepButton() {
     const netGame = netActive();
     const cheat = netGame && state.net.cheatAutoStep;
-    const usable = state.live
+    const usable = !state.replay.active
+      && state.live
       && !state.busy
       && state.game.result.type === "ongoing"
       // 联机默认禁用（让引擎替你走子等于代打）；只有金手指开启时放行。
@@ -3777,7 +3846,7 @@
   }
 
   function updatePlayButton() {
-    const hasAI = !netActive()
+    const hasAI = !state.replay.active && !netActive()
       && (state.control[RED] === "ai" || state.control[BLACK] === "ai");
     elements.playToggle.disabled = !hasAI;
     elements.playToggle.textContent = state.playing ? "\u23F8" : "\u25B6";
@@ -3829,6 +3898,7 @@
   }
 
   function togglePlay() {
+    if (state.replay.active) return;
     state.playing = !state.playing;
     updatePlayButton();
     if (state.playing && !state.live) resumeLiveGame();
@@ -3845,6 +3915,7 @@
   }
 
   function enterReviewAt(ply) {
+    if (state.replay.active) stopReplayPlayback();
     state.live = false;
     state.reviewPly = clamp(Number(ply || 0), 0, state.game.history.length);
     state.selected = null;
@@ -3884,6 +3955,10 @@
   // "自动下一步": the system plays one move for whichever human-controlled side
   // is on the move, using that side's remembered AI strength.
   async function playAutoStep() {
+    if (state.replay.active) {
+      setStatus("棋谱复盘为只读模式");
+      return;
+    }
     if (state.busy || !state.live || state.game.result.type !== "ongoing") return;
     if (netActive() && !state.net.cheatAutoStep) {
       setStatus("联机对局不使用自动下一步");
@@ -3908,6 +3983,13 @@
   // A per-side select change can mean "take over", "hand back to the AI", or
   // just "change that side's strength" - all three take effect immediately.
   function onSetupChange(side, value) {
+    if (state.replay.active) {
+      elements.redSetup.value = setupValue(RED);
+      elements.blackSetup.value = setupValue(BLACK);
+      renderLabels();
+      setStatus("退出复盘后才能调整执棋方");
+      return;
+    }
     applySetup(side, value);
     state.session += 1;
     aiDriverToken += 1;
@@ -3923,6 +4005,7 @@
   }
 
   function resetGame(options = {}) {
+    discardRecordReplay();
     state.session += 1;
     aiDriverToken += 1;
     state.game = new XiangqiGame();
@@ -3932,6 +4015,11 @@
     state.reviewPly = 0;
     state.displayAnalysis = null;
     state.busy = false;
+    state.initialFen = Records ? Records.INITIAL_FEN : "";
+    state.initialBoard = cloneBoard(INITIAL_POSITION);
+    state.initialSide = RED;
+    state.gameId = newRecordId();
+    state.finishedRecordQueued = false;
     state.startedAt = Date.now();
     state.turnStartedAt = state.startedAt;
     state.endedAt = 0;
@@ -3948,6 +4036,10 @@
   }
 
   function undo(options = {}) {
+    if (state.replay.active) {
+      setStatus("复盘模式不能悔棋");
+      return;
+    }
     // In a net game an undo has to be agreed by the other side first.
     if (netActive() && !options.remote) {
       if (state.game.history.length === 0) return;
@@ -3960,6 +4052,7 @@
     state.session += 1;
     aiDriverToken += 1;
     state.busy = false;
+    state.finishedRecordQueued = false;
     if (state.game.history.length === 0) {
       renderThinking();
       render();
@@ -4080,12 +4173,18 @@
     onSetupChange(BLACK, elements.blackSetup.value);
   });
 
-  document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      const panelId = `panel-${tab.dataset.tab}`;
-      document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item === tab));
-      document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === panelId));
+  function activatePanel(name) {
+    const panelId = `panel-${name}`;
+    document.querySelectorAll(".tab").forEach((item) => {
+      item.classList.toggle("active", item.dataset.tab === name);
     });
+    document.querySelectorAll(".panel").forEach((panel) => {
+      panel.classList.toggle("active", panel.id === panelId);
+    });
+  }
+
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => activatePanel(tab.dataset.tab));
   });
 
   elements.moveList.addEventListener("click", (event) => {
@@ -4118,6 +4217,16 @@
   elements.nextMove.addEventListener("click", () => {
     const oldPly = currentPly();
     const nextPly = Math.min(state.game.history.length, oldPly + 1);
+    if (state.replay.active) {
+      stopReplayPlayback();
+      state.reviewPly = nextPly;
+      state.live = false;
+      render();
+      if (nextPly === oldPly + 1) {
+        animateMoveTransition(state.game.history[nextPly - 1], false);
+      }
+      return;
+    }
     state.reviewPly = nextPly;
     state.live = state.reviewPly === state.game.history.length;
     if (state.live) {
@@ -4130,11 +4239,79 @@
     }
   });
   elements.lastMove.addEventListener("click", () => {
+    if (state.replay.active) {
+      stopReplayPlayback();
+      state.reviewPly = state.game.history.length;
+      state.live = false;
+      render();
+      return;
+    }
     resumeLiveGame();
   });
   elements.liveMode.addEventListener("click", () => {
+    if (state.replay.active) {
+      exitRecordReplay();
+      return;
+    }
     resumeLiveGame();
   });
+  if (elements.replayPlay) {
+    elements.replayPlay.addEventListener("click", toggleReplayPlayback);
+  }
+  if (elements.replayExit) {
+    elements.replayExit.addEventListener("click", exitRecordReplay);
+  }
+  if (elements.replaySpeed) {
+    elements.replaySpeed.addEventListener("change", () => {
+      state.replay.speed = Math.max(0.5, Number(elements.replaySpeed.value) || 1);
+      if (state.replay.playing) {
+        stopReplayPlayback();
+        state.replay.playing = true;
+        updateReplayButton();
+        scheduleReplayStep();
+      }
+    });
+  }
+
+  if (elements.recordSaveCurrent) {
+    elements.recordSaveCurrent.addEventListener("click", () => saveCurrentRecord());
+  }
+  if (elements.recordExportCurrent) {
+    elements.recordExportCurrent.addEventListener("click", () => {
+      try {
+        const record = currentExportRecord();
+        if (exportRecordFile(record)) setRecordStatus("当前棋谱已导出。", "success");
+      } catch (error) {
+        setRecordStatus("导出失败：" + defaultTo(error && error.message, "unknown"), "error");
+      }
+    });
+  }
+  if (elements.recordImportFile && elements.recordFile) {
+    elements.recordImportFile.addEventListener("click", () => elements.recordFile.click());
+    elements.recordFile.addEventListener("change", () => {
+      const file = elements.recordFile.files && elements.recordFile.files[0];
+      readRecordFile(file);
+      elements.recordFile.value = "";
+    });
+  }
+  if (elements.recordImportTextButton) {
+    elements.recordImportTextButton.addEventListener("click", () => {
+      importRecordText(elements.recordImportText.value, "粘贴棋谱");
+    });
+  }
+  if (elements.recordClearText) {
+    elements.recordClearText.addEventListener("click", () => {
+      elements.recordImportText.value = "";
+      setRecordStatus("", "");
+    });
+  }
+  if (elements.recordList) {
+    elements.recordList.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-record-action]");
+      if (!button) return;
+      handleRecordAction(button.dataset.recordAction, button.dataset.recordId);
+    });
+  }
 
   document.querySelectorAll(".quick-chat").forEach((container) => {
     container.addEventListener("click", (event) => {
@@ -4186,6 +4363,10 @@
 
   function timeSlug() {
     return new Date().toISOString().replace(/[:.]/g, "-").replace("T", "-").slice(0, 19);
+  }
+
+  function newRecordId() {
+    return "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
   function downloadFile(filename, text, mime) {
@@ -4251,7 +4432,8 @@
     });
   }
 
-  function applyDebugGame(game, label) {
+  function applyDebugGame(game, label, initialFen) {
+    discardRecordReplay();
     state.session += 1;
     aiDriverToken += 1;
     state.game = game;
@@ -4262,6 +4444,12 @@
     state.displayAnalysis = null;
     state.busy = false;
     state.playing = false;
+    state.initialFen = initialFen || (Records ? Records.INITIAL_FEN : "");
+    const initial = parseXiangqiFen(state.initialFen);
+    state.initialBoard = cloneBoard(initial.board);
+    state.initialSide = initial.side;
+    state.gameId = newRecordId();
+    state.finishedRecordQueued = false;
     state.startedAt = Date.now();
     state.turnStartedAt = state.startedAt;
     state.endedAt = 0;
@@ -4470,7 +4658,11 @@
       game.positionCounts[stateKey(parsed.board, parsed.side)] = 1;
       game.halfmoveClock = 0;
       game.result = { type: "ongoing", winner: null, reason: "" };
-      applyDebugGame(game, `已载入 FEN（${parsed.side === RED ? "红" : "黑"}方行棋）`);
+      applyDebugGame(
+        game,
+        `已载入 FEN（${parsed.side === RED ? "红" : "黑"}方行棋）`,
+        Records.boardToFen(parsed.board, parsed.side, 0)
+      );
     } catch (error) {
       sysLine("FEN 解析失败：" + defaultTo(error && error.message, "unknown"));
     }
@@ -4496,7 +4688,11 @@
           throw new Error(`第 ${index + 1} 手不合法（${defaultTo(error && error.message, "unknown")}）`);
         }
       }
-      applyDebugGame(game, `已载入 ${moves.length} 手（${game.result.type === "ongoing" ? "未分胜负" : "已结束"}）`);
+      applyDebugGame(
+        game,
+        `已载入 ${moves.length} 手（${game.result.type === "ongoing" ? "未分胜负" : "已结束"}）`,
+        Records ? Records.INITIAL_FEN : ""
+      );
     } catch (error) {
       sysLine("载入失败：" + defaultTo(error && error.message, "unknown"));
     }
@@ -4525,24 +4721,48 @@
 
   function buildGameExport() {
     const now = new Date().toISOString();
-    const nameOf = (side) => {
+    if (!Records) throw new Error("棋谱格式模块未加载");
+    const playerOf = (side) => {
+      let name;
       if (netActive()) {
-        return side === state.net.mySide ? netPlayerName : (state.net.peerName || "对手");
+        name = side === state.net.mySide ? netPlayerName : (state.net.peerName || "对手");
+      } else if (state.control[side] === "human") {
+        name = "我";
+      } else {
+        const level = AI_LEVELS[state.levels[side]];
+        name = "AI · " + (level ? level.label : state.levels[side]);
       }
-      if (state.control[side] === "human") return "我";
-      const level = AI_LEVELS[state.levels[side]];
-      return "AI · " + (level ? level.label : state.levels[side]);
+      return {
+        kind: netActive() ? "remote" : state.control[side] === "ai" ? "ai" : "human",
+        name: name,
+        level: state.control[side] === "ai" ? state.levels[side] : null
+      };
     };
-    return {
-      format: "yijian.game",
-      version: 1,
-      id: "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    const endedAt = state.game.result.type === "ongoing" ? null : now;
+    const durationMs = Math.max(
+      0,
+      (state.endedAt || Date.now()) - (state.startedAt || Date.now())
+    );
+    const record = Records.normalize({
+      format: Records.FORMAT,
+      version: Records.VERSION,
+      id: state.gameId || newRecordId(),
       createdAt: new Date(state.startedAt || Date.now()).toISOString(),
-      endedAt: state.game.result.type === "ongoing" ? null : now,
-      mode: netActive() ? "online" : "local",
-      red: { name: nameOf(RED) },
-      black: { name: nameOf(BLACK) },
+      endedAt: endedAt,
+      mode: netActive() ? "online"
+        : (state.control[RED] === "ai" && state.control[BLACK] === "ai" ? "ai-vs-ai" : "local"),
+      rules: {
+        initialFen: state.initialFen || Records.INITIAL_FEN
+      },
+      players: {
+        red: playerOf(RED),
+        black: playerOf(BLACK)
+      },
       result: Object.assign({}, state.game.result),
+      clocks: {
+        durationMs: durationMs,
+        halfmoveClock: state.game.halfmoveClock
+      },
       moves: state.game.history.map((record) => ({
         i: record.index,
         from: record.from,
@@ -4551,17 +4771,563 @@
         notation: record.notation,
         ms: record.moveTimeMs || 0,
         quality: record.quality ? record.quality.label : "",
-        winRed: typeof record.winRedAfter === "number" ? record.winRedAfter : null
+        winRed: typeof record.winRedAfter === "number" ? record.winRedAfter : null,
+        evalRed: typeof record.evalRedAfter === "number" ? record.evalRedAfter : null
       })),
-      meta: { app: APP_ASSET_VERSION, engine: "yijian" }
-    };
+      meta: {
+        app: APP_ASSET_VERSION,
+        engine: Pikafish ? "yijian+pikafish" : "yijian"
+      }
+    });
+    state.gameId = record.id;
+    return record;
+  }
+
+  function currentExportRecord() {
+    if (state.replay.active && state.replay.record) {
+      return Records.normalize(state.replay.record);
+    }
+    return buildGameExport();
   }
 
   function debugDump() {
-    const record = buildGameExport();
-    const text = JSON.stringify(record, null, 2);
-    if (!downloadFile(`yijian-game-${timeSlug()}.json`, text)) return;
+    const record = currentExportRecord();
+    const text = Records.exportText(record);
+    if (!downloadFile(`yijian-game-${timeSlug()}.yijian.json`, text)) return;
     sysLine(`棋谱已导出（${record.moves.length} 手）`);
+  }
+
+  // ------------------------------------------------------------ 本地棋谱库
+  const RECORD_DB_NAME = "yijian.records";
+  const RECORD_DB_VERSION = 1;
+  const RECORD_GAMES_STORE = "games";
+  const RECORD_SUMMARY_STORE = "summaries";
+  let recordDbPromise = null;
+  let recordSummaries = [];
+  const recordCache = Object.create(null);
+
+  function recordStorageAvailable() {
+    return typeof window.indexedDB !== "undefined" && window.indexedDB !== null;
+  }
+
+  function openRecordDb() {
+    if (!recordStorageAvailable()) {
+      return Promise.reject(new Error("当前环境不支持 IndexedDB，棋谱无法持久保存"));
+    }
+    if (recordDbPromise) return recordDbPromise;
+    recordDbPromise = new Promise((resolve, reject) => {
+      const request = window.indexedDB.open(RECORD_DB_NAME, RECORD_DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(RECORD_GAMES_STORE)) {
+          db.createObjectStore(RECORD_GAMES_STORE, { keyPath: "id" });
+        }
+        if (!db.objectStoreNames.contains(RECORD_SUMMARY_STORE)) {
+          const store = db.createObjectStore(RECORD_SUMMARY_STORE, { keyPath: "id" });
+          store.createIndex("updatedAt", "updatedAt", { unique: false });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("打开棋谱库失败"));
+    });
+    recordDbPromise.catch(() => {
+      recordDbPromise = null;
+    });
+    return recordDbPromise;
+  }
+
+  function saveRecordToDb(record) {
+    return openRecordDb().then((db) => new Promise((resolve, reject) => {
+      const transaction = db.transaction(
+        [RECORD_GAMES_STORE, RECORD_SUMMARY_STORE],
+        "readwrite"
+      );
+      transaction.objectStore(RECORD_GAMES_STORE).put(record);
+      transaction.objectStore(RECORD_SUMMARY_STORE).put(Records.summary(record));
+      transaction.oncomplete = () => {
+        recordCache[record.id] = record;
+        resolve(record);
+      };
+      transaction.onerror = () => reject(transaction.error || new Error("保存棋谱失败"));
+      transaction.onabort = () => reject(transaction.error || new Error("保存棋谱被取消"));
+    }));
+  }
+
+  function getRecordFromDb(id) {
+    if (recordCache[id]) return Promise.resolve(recordCache[id]);
+    return openRecordDb().then((db) => new Promise((resolve, reject) => {
+      const request = db.transaction(RECORD_GAMES_STORE, "readonly")
+        .objectStore(RECORD_GAMES_STORE)
+        .get(id);
+      request.onsuccess = () => {
+        if (!request.result) {
+          reject(new Error("棋谱不存在或已删除"));
+          return;
+        }
+        recordCache[id] = request.result;
+        resolve(request.result);
+      };
+      request.onerror = () => reject(request.error || new Error("读取棋谱失败"));
+    }));
+  }
+
+  function deleteRecordFromDb(id) {
+    return openRecordDb().then((db) => new Promise((resolve, reject) => {
+      const transaction = db.transaction(
+        [RECORD_GAMES_STORE, RECORD_SUMMARY_STORE],
+        "readwrite"
+      );
+      transaction.objectStore(RECORD_GAMES_STORE).delete(id);
+      transaction.objectStore(RECORD_SUMMARY_STORE).delete(id);
+      transaction.oncomplete = () => {
+        delete recordCache[id];
+        resolve();
+      };
+      transaction.onerror = () => reject(transaction.error || new Error("删除棋谱失败"));
+    }));
+  }
+
+  function listRecordSummaries() {
+    return openRecordDb().then((db) => new Promise((resolve, reject) => {
+      const out = [];
+      const transaction = db.transaction(RECORD_SUMMARY_STORE, "readonly");
+      const index = transaction.objectStore(RECORD_SUMMARY_STORE).index("updatedAt");
+      const request = index.openCursor(null, "prev");
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) {
+          out.push(cursor.value);
+          cursor.continue();
+        } else {
+          resolve(out);
+        }
+      };
+      request.onerror = () => reject(request.error || new Error("读取棋谱列表失败"));
+    }));
+  }
+
+  function setRecordStatus(text, tone) {
+    if (!elements.recordStatus) return;
+    elements.recordStatus.textContent = text || "";
+    elements.recordStatus.className = "record-status" + (tone ? " " + tone : "");
+  }
+
+  function formatRecordDate(value) {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return "-";
+    const pad = (number) => String(number).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+      + `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function createRecordCard(summary) {
+    const card = document.createElement("article");
+    card.className = "record-card";
+    const head = document.createElement("div");
+    head.className = "record-card-head";
+    const title = document.createElement("strong");
+    title.textContent = summary.title;
+    const date = document.createElement("span");
+    date.textContent = formatRecordDate(summary.updatedAt || summary.createdAt);
+    head.append(title, date);
+
+    const meta = document.createElement("div");
+    meta.className = "record-card-meta";
+    const modeText = summary.mode === "online" ? "联机"
+      : summary.mode === "ai-vs-ai" ? "AI 对弈" : "本地";
+    meta.textContent = `${summary.moveCount} 手 · ${summary.resultText} · ${modeText}`;
+
+    const actions = document.createElement("div");
+    actions.className = "record-card-actions";
+    [
+      { action: "replay", label: "复盘", primary: true },
+      { action: "export", label: "导出", primary: false },
+      { action: "delete", label: "删除", primary: false }
+    ].forEach((entry) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn small" + (entry.primary ? " primary" : "");
+      button.textContent = entry.label;
+      button.dataset.recordAction = entry.action;
+      button.dataset.recordId = summary.id;
+      actions.appendChild(button);
+    });
+
+    card.append(head, meta, actions);
+    return card;
+  }
+
+  function renderRecordLibrary(list) {
+    recordSummaries = Array.isArray(list) ? list : [];
+    if (elements.recordCount) {
+      elements.recordCount.textContent = `${recordSummaries.length} 盘`;
+    }
+    if (!elements.recordList) return;
+    if (!recordSummaries.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "还没有保存的棋谱。结束一局后会自动入库，也可以手动保存或导入。";
+      setChildren(elements.recordList, [empty]);
+      return;
+    }
+    setChildren(elements.recordList, recordSummaries.map(createRecordCard));
+  }
+
+  function refreshRecordLibrary() {
+    if (!recordStorageAvailable()) {
+      renderRecordLibrary([]);
+      setRecordStatus("当前环境不支持 IndexedDB，导入的棋谱仍可临时复盘和导出。", "error");
+      return Promise.resolve([]);
+    }
+    return listRecordSummaries().then((list) => {
+      renderRecordLibrary(list);
+      return list;
+    }).catch((error) => {
+      renderRecordLibrary([]);
+      setRecordStatus("读取棋谱库失败：" + defaultTo(error && error.message, "unknown"), "error");
+      return [];
+    });
+  }
+
+  function saveRecordToLibrary(record) {
+    const normalized = Records.normalize(record);
+    return saveRecordToDb(normalized).then((saved) => {
+      const summary = Records.summary(saved);
+      recordSummaries = recordSummaries
+        .filter((entry) => entry.id !== summary.id)
+        .concat([summary])
+        .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+      renderRecordLibrary(recordSummaries);
+      return saved;
+    });
+  }
+
+  function saveCurrentRecord(options = {}) {
+    let record;
+    try {
+      record = currentExportRecord();
+    } catch (error) {
+      setRecordStatus("生成棋谱失败：" + defaultTo(error && error.message, "unknown"), "error");
+      return Promise.resolve(null);
+    }
+    return saveRecordToLibrary(record).then((saved) => {
+      if (!options.automatic) {
+        setRecordStatus(`已保存「${Records.summary(saved).title}」`, "success");
+      }
+      return saved;
+    }).catch((error) => {
+      setRecordStatus("保存失败：" + defaultTo(error && error.message, "unknown"), "error");
+      return null;
+    });
+  }
+
+  function exportRecordFile(record) {
+    const normalized = Records.normalize(record);
+    const stamp = String(normalized.createdAt || new Date().toISOString()).slice(0, 10);
+    const text = Records.exportText(normalized);
+    return downloadFile(`yijian-${stamp}-${normalized.id}.yijian.json`, text);
+  }
+
+  function gameFromRecord(record) {
+    const parsed = parseXiangqiFen(record.rules.initialFen);
+    const game = new XiangqiGame();
+    game.board = cloneBoard(parsed.board);
+    game.sideToMove = parsed.side;
+    game.history = [];
+    game.positionCounts = Object.create(null);
+    game.positionCounts[stateKey(game.board, game.sideToMove)] = 1;
+    game.halfmoveClock = record.clocks.halfmoveClock || 0;
+    game.result = { type: "ongoing", winner: null, reason: "" };
+
+    record.moves.forEach((move, index) => {
+      if (move.side && move.side !== game.sideToMove) {
+        throw new Error(`第 ${index + 1} 手行棋方不一致`);
+      }
+      let played;
+      try {
+        played = game.play(move.from, move.to);
+      } catch (error) {
+        throw new Error(`第 ${index + 1} 手不合法（${defaultTo(error && error.message, "unknown")}）`);
+      }
+      played.moveTimeMs = move.ms || 0;
+      played.winRedAfter = move.winRed;
+      played.evalRedAfter = move.evalRed;
+      if (move.quality) {
+        played.quality = {
+          label: move.quality,
+          score: 0,
+          css: "",
+          bestRate: move.winRed,
+          chosenRate: move.winRed
+        };
+      }
+    });
+
+    if (record.result.type !== "ongoing" && game.result.type === "ongoing") {
+      game.result = Object.assign({}, record.result);
+    }
+    return game;
+  }
+
+  function replaySnapshot() {
+    return {
+      game: state.game.snapshot(),
+      control: Object.assign({}, state.control),
+      levels: Object.assign({}, state.levels),
+      startedAt: state.startedAt,
+      turnStartedAt: state.turnStartedAt,
+      endedAt: state.endedAt,
+      initialFen: state.initialFen,
+      initialBoard: cloneBoard(state.initialBoard),
+      initialSide: state.initialSide,
+      gameId: state.gameId,
+      displayAnalysis: state.displayAnalysis,
+      playing: state.playing,
+      live: state.live,
+      reviewPly: state.reviewPly,
+      finishedRecordQueued: state.finishedRecordQueued
+    };
+  }
+
+  function openRecordReplay(input, replayGame) {
+    let record;
+    try {
+      record = Records.normalize(input);
+      if (!replayGame) replayGame = gameFromRecord(record);
+    } catch (error) {
+      setRecordStatus("无法复盘：" + defaultTo(error && error.message, "unknown"), "error");
+      return false;
+    }
+    if (!state.replay.active) state.replay.backup = replaySnapshot();
+    stopReplayPlayback();
+    state.session += 1;
+    aiDriverToken += 1;
+    state.busy = false;
+    state.game = replayGame;
+    state.selected = null;
+    state.legalMoves = [];
+    state.live = false;
+    state.reviewPly = 0;
+    state.displayAnalysis = null;
+    state.playing = false;
+    state.initialFen = record.rules.initialFen;
+    const initial = parseXiangqiFen(record.rules.initialFen);
+    state.initialBoard = cloneBoard(initial.board);
+    state.initialSide = initial.side;
+    state.startedAt = Date.parse(record.createdAt) || Date.now();
+    state.endedAt = record.endedAt ? Date.parse(record.endedAt) || 0 : 0;
+    state.control[RED] = record.players.red.kind === "ai" ? "ai" : "human";
+    state.control[BLACK] = record.players.black.kind === "ai" ? "ai" : "human";
+    if (record.players.red.level && AI_LEVELS[record.players.red.level]) {
+      state.levels[RED] = record.players.red.level;
+    }
+    if (record.players.black.level && AI_LEVELS[record.players.black.level]) {
+      state.levels[BLACK] = record.players.black.level;
+    }
+    state.replay.active = true;
+    state.replay.record = record;
+    state.replay.playing = false;
+    state.replay.speed = elements.replaySpeed
+      ? Number(elements.replaySpeed.value) || 1 : 1;
+    renderThinking();
+    activatePanel("review");
+    render();
+    setStatus("已进入棋谱复盘（只读）");
+    return true;
+  }
+
+  function discardRecordReplay() {
+    if (!state.replay.active) return;
+    stopReplayPlayback();
+    state.replay.active = false;
+    state.replay.record = null;
+    state.replay.backup = null;
+    state.replay.playing = false;
+  }
+
+  function exitRecordReplay() {
+    if (!state.replay.active) return;
+    const backup = state.replay.backup;
+    stopReplayPlayback();
+    state.replay.active = false;
+    state.replay.record = null;
+    state.replay.backup = null;
+    state.replay.playing = false;
+    if (!backup) {
+      resetGame();
+      return;
+    }
+    state.game = new XiangqiGame();
+    state.game.restore(backup.game);
+    state.control = Object.assign({}, backup.control);
+    state.levels = Object.assign({}, backup.levels);
+    state.startedAt = backup.startedAt;
+    state.turnStartedAt = backup.turnStartedAt;
+    state.endedAt = backup.endedAt;
+    state.initialFen = backup.initialFen;
+    state.initialBoard = cloneBoard(backup.initialBoard);
+    state.initialSide = backup.initialSide;
+    state.gameId = backup.gameId;
+    state.displayAnalysis = backup.displayAnalysis;
+    state.playing = backup.playing;
+    state.live = backup.live;
+    state.reviewPly = backup.reviewPly;
+    state.finishedRecordQueued = backup.finishedRecordQueued;
+    state.selected = null;
+    state.legalMoves = [];
+    state.busy = false;
+    renderThinking();
+    updatePlayButton();
+    render();
+    setStatus("已退出棋谱复盘");
+    if (state.game.result.type === "ongoing" && state.playing) restartAIDriverFromState();
+  }
+
+  function updateReplayButton() {
+    if (!elements.replayPlay) return;
+    elements.replayPlay.textContent = state.replay.playing ? "暂停" : "播放";
+    elements.replayPlay.setAttribute("aria-label", state.replay.playing ? "暂停复盘" : "播放复盘");
+  }
+
+  function renderReplayNotice() {
+    if (!elements.replayNotice) return;
+    const active = state.replay.active && state.replay.record;
+    elements.replayNotice.hidden = !active;
+    if (elements.liveMode) {
+      elements.liveMode.textContent = active ? "退出复盘" : "回到当前";
+    }
+    if (!active) {
+      updateReplayButton();
+      return;
+    }
+    const record = state.replay.record;
+    elements.replayTitle.textContent = `${record.players.red.name} 对 ${record.players.black.name}`;
+    elements.replayPosition.textContent = `第 ${currentPly()} / ${state.game.history.length} 手 · 只读`;
+    if (elements.replaySpeed) elements.replaySpeed.value = String(state.replay.speed);
+    updateReplayButton();
+  }
+
+  function stopReplayPlayback() {
+    if (state.replay.timer) {
+      window.clearTimeout(state.replay.timer);
+      state.replay.timer = 0;
+    }
+    state.replay.playing = false;
+    updateReplayButton();
+  }
+
+  function scheduleReplayStep() {
+    if (!state.replay.active || !state.replay.playing) return;
+    const speed = Math.max(0.5, Number(state.replay.speed) || 1);
+    state.replay.timer = window.setTimeout(() => {
+      state.replay.timer = 0;
+      if (!state.replay.active || !state.replay.playing) return;
+      const oldPly = currentPly();
+      const nextPly = Math.min(state.game.history.length, oldPly + 1);
+      if (nextPly === oldPly) {
+        stopReplayPlayback();
+        return;
+      }
+      state.reviewPly = nextPly;
+      state.live = false;
+      render();
+      animateMoveTransition(state.game.history[nextPly - 1], false);
+      if (nextPly >= state.game.history.length) stopReplayPlayback();
+      else scheduleReplayStep();
+    }, Math.round(900 / speed));
+  }
+
+  function toggleReplayPlayback() {
+    if (!state.replay.active) return;
+    if (state.replay.playing) {
+      stopReplayPlayback();
+      render();
+      return;
+    }
+    if (!state.game.history.length) return;
+    if (currentPly() >= state.game.history.length) {
+      state.reviewPly = 0;
+      state.live = false;
+      render();
+    }
+    state.replay.playing = true;
+    updateReplayButton();
+    scheduleReplayStep();
+  }
+
+  function readRecordFile(file) {
+    if (!file) return;
+    if (typeof window.FileReader !== "function") {
+      setRecordStatus("当前环境不支持读取本地文件，请粘贴棋谱文本导入。", "error");
+      return;
+    }
+    const reader = new window.FileReader();
+    reader.onload = () => importRecordText(String(reader.result || ""), file.name);
+    reader.onerror = () => setRecordStatus("读取文件失败", "error");
+    reader.readAsText(file, "utf-8");
+  }
+
+  function importRecordText(text, sourceName) {
+    let record;
+    let replayGame;
+    try {
+      record = Records.read(text, { name: sourceName || "粘贴内容", importedFrom: sourceName || "" });
+      replayGame = gameFromRecord(record);
+    } catch (error) {
+      setRecordStatus("导入失败：" + defaultTo(error && error.message, "unknown"), "error");
+      return Promise.resolve(false);
+    }
+    return saveRecordToLibrary(record).then(() => {
+      setRecordStatus(`已导入 ${record.moves.length} 手，正在打开复盘。`, "success");
+      if (elements.recordImportText) elements.recordImportText.value = "";
+      openRecordReplay(record, replayGame);
+      return true;
+    }).catch((error) => {
+      setRecordStatus("棋谱已解析，但保存到本机失败：" + defaultTo(error && error.message, "unknown"), "error");
+      openRecordReplay(record, replayGame);
+      return true;
+    });
+  }
+
+  function queueFinishedRecord() {
+    if (state.replay.active
+      || state.finishedRecordQueued
+      || state.game.result.type === "ongoing"
+      || state.game.history.length === 0
+      || !recordStorageAvailable()) return;
+    state.finishedRecordQueued = true;
+    window.setTimeout(() => {
+      saveCurrentRecord({ automatic: true });
+    }, 0);
+  }
+
+  function handleRecordAction(action, id) {
+    if (action === "replay") {
+      getRecordFromDb(id).then((record) => {
+        openRecordReplay(record);
+      }).catch((error) => {
+        setRecordStatus("打开棋谱失败：" + defaultTo(error && error.message, "unknown"), "error");
+      });
+      return;
+    }
+    if (action === "export") {
+      getRecordFromDb(id).then((record) => {
+        if (exportRecordFile(record)) setRecordStatus("棋谱文件已导出。", "success");
+      }).catch((error) => {
+        setRecordStatus("导出失败：" + defaultTo(error && error.message, "unknown"), "error");
+      });
+      return;
+    }
+    if (action === "delete") {
+      const ask = "确定删除这盘棋谱吗？";
+      if (typeof window.confirm === "function" && !window.confirm(ask)) return;
+      deleteRecordFromDb(id).then(() => {
+        setRecordStatus("棋谱已删除。", "success");
+        return refreshRecordLibrary();
+      }).catch((error) => {
+        setRecordStatus("删除失败：" + defaultTo(error && error.message, "unknown"), "error");
+      });
+    }
   }
 
   function debugErrors(arg) {
@@ -5773,6 +6539,14 @@
     pointToSquare,
     renderMoveLine,
     renderMoveTicker,
+    Records,
+    buildGameExport,
+    currentExportRecord,
+    gameFromRecord,
+    openRecordReplay,
+    exitRecordReplay,
+    importRecordText,
+    saveCurrentRecord,
     spawnMoveTrail,
     formatClock,
     updateClocks,
@@ -5990,6 +6764,7 @@
   state.soundOn = loadSoundSetting();
   state.flipped = loadFlipSetting() === true;
   resetGame();
+  refreshRecordLibrary();
   netInit();
   // Keep the clocks live. `setInterval` is optional so a headless harness that
   // only stubs setTimeout can still load this file.

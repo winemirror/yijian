@@ -304,7 +304,7 @@ class RelayClient {
     const socket = new WebSocket(this.url);
     this.socket = socket;
     socket.addEventListener("open", () => {
-      this.send({ t: "hello", proto: 1, name: "皮卡鱼测试节点" });
+      this.send({ t: "hello", proto: 1, name: "皮卡鱼常驻节点" });
     });
     socket.addEventListener("message", (event) => {
       let message = null;
@@ -348,7 +348,7 @@ class RelayClient {
       this.selfId = message.clientId || "";
       this.send({
         t: "room.create",
-        name: "皮卡鱼测试节点",
+        name: "皮卡鱼常驻节点",
         visibility: "private",
         preferredId: this.roomId
       });
