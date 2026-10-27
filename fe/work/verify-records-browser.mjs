@@ -108,6 +108,20 @@ try {
   check("record protocol module is loaded", await evaluate("typeof XiangqiRecords === 'object'"));
   check("records tab is present", await evaluate("Boolean(document.querySelector('[data-tab=records]'))"));
 
+  console.log("== quality commentary + brilliant banner ==");
+  check("traditional move term is displayed",
+    await evaluate("XiangqiLocal.qualityDisplayLabel({ label: '失误' }) === '无理手'"));
+  await evaluate("XiangqiLocal.showBrilliantBanner('r')");
+  check("red brilliant banner is visible",
+    await evaluate("document.querySelector('#brilliantBanner').hidden === false"));
+  check("brilliant banner names the side",
+    await evaluate("document.querySelector('#brilliantBannerText').textContent === '红方妙手'"));
+  const brilliantShot = await cdp("Page.captureScreenshot", { format: "png" });
+  const brilliantPath = path.join("outputs", "brilliant-banner-check.png");
+  fs.writeFileSync(brilliantPath, Buffer.from(brilliantShot.data, "base64"));
+  console.log(`  screenshot ${brilliantPath}`);
+  await evaluate("XiangqiLocal.hideBrilliantBanner()");
+
   console.log("== save to IndexedDB ==");
   await evaluate("XiangqiLocal.reset()");
   await evaluate(`(() => {
