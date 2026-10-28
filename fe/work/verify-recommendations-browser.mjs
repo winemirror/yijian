@@ -68,6 +68,10 @@ async function exerciseViewport(browser, name, viewport) {
       depth: window.XiangqiLocal.state.recommendation.depth,
       markedPieces: document.querySelectorAll(".piece[data-recommend-tier]").length,
       topPieces: document.querySelectorAll('.piece[data-recommend-top="1"]').length,
+    pieceTierCount: new Set(
+      [...document.querySelectorAll(".piece[data-recommend-tier]")]
+        .map((node) => node.dataset.recommendTier)
+    ).size,
       legendHidden: document.getElementById("recommendationLegend").hidden,
       practiceText: document.getElementById("recommendationToggle").textContent.trim(),
       topbarHeight: document.querySelector(".topbar").getBoundingClientRect().height,
@@ -83,6 +87,8 @@ async function exerciseViewport(browser, name, viewport) {
   check(`${name}: analysis has depth`, state.depth >= 1, String(state.depth));
   check(`${name}: current-side pieces have rings`, state.markedPieces >= 10, String(state.markedPieces));
   check(`${name}: one best piece has a badge`, state.topPieces === 1, String(state.topPieces));
+  check(`${name}: piece colours form a visible ranking gradient`,
+    state.pieceTierCount >= 3, String(state.pieceTierCount));
   check(`${name}: legend is visible`, state.legendHidden === false);
   check(`${name}: toggle is named practice`, state.practiceText.includes("练习"));
   if (name === "desktop" || name === "laptop") {
@@ -277,6 +283,55 @@ async function exerciseViewport(browser, name, viewport) {
       && reloaded.marked === 0
       && reloaded.legendHidden === true,
     JSON.stringify(reloaded));
+
+  if (name === "desktop") {
+    await page.evaluate(() => window.XiangqiLocal.toggleRecommendation());
+    await waitForRecommendation(page);
+    await page.evaluate(() => {
+      window.XiangqiLocal.netBegin("host", "r", "浏览器联机测试");
+    });
+    await page.waitForFunction(() => window.XiangqiLocal.state.net.active === true);
+    const netState = await page.evaluate(() => ({
+      recommendationVisible: window.XiangqiLocal.recommendationVisible(),
+      marked: document.querySelectorAll(".piece[data-recommend-tier]").length,
+      practiceDisabled: document.getElementById("recommendationToggle").disabled,
+      depthDisabled: document.getElementById("practiceDepth").disabled,
+      redSetup: document.getElementById("redSetup").value,
+      blackSetup: document.getElementById("blackSetup").value,
+      redDisabled: document.getElementById("redSetup").disabled,
+      blackDisabled: document.getElementById("blackSetup").disabled
+    }));
+    check(`${name}: multiplayer hides practice overlays`,
+      netState.recommendationVisible === false
+        && netState.marked === 0
+        && netState.practiceDisabled === true
+        && netState.depthDisabled === true,
+      JSON.stringify(netState));
+    check(`${name}: multiplayer locks both seats as players`,
+      netState.redSetup === "player"
+        && netState.blackSetup === "player"
+        && netState.redDisabled === true
+        && netState.blackDisabled === true,
+      JSON.stringify(netState));
+
+    await page.evaluate(() => window.XiangqiLocal.netLeave());
+    await page.waitForFunction(() => window.XiangqiLocal.state.net.active === false);
+    await waitForRecommendation(page);
+    const restored = await page.evaluate(() => ({
+      marked: document.querySelectorAll(".piece[data-recommend-tier]").length,
+      practiceDisabled: document.getElementById("recommendationToggle").disabled,
+      depthDisabled: document.getElementById("practiceDepth").disabled,
+      redDisabled: document.getElementById("redSetup").disabled,
+      blackDisabled: document.getElementById("blackSetup").disabled
+    }));
+    check(`${name}: leaving multiplayer restores local practice controls`,
+      restored.marked > 0
+        && restored.practiceDisabled === false
+        && restored.depthDisabled === false
+        && restored.redDisabled === false
+        && restored.blackDisabled === false,
+      JSON.stringify(restored));
+  }
 
   await context.close();
 }

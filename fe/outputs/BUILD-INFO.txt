@@ -7,13 +7,13 @@
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
 APK 文件: Yijian-Xiangqi-3.20.apk
-文件大小: 4407794 bytes
-SHA-256: D4793D22229220C81BC51AFCAAE01BB6951CD9C5CD435E3A79A46BF94F01354B
+文件大小: 4488669 bytes
+SHA-256: BA7E2CC271E74174A2D9BAF92F8E8C9109C4A154D1D00AAE5CF27E23F699110A
 
 桌面版: YiJian-Xiangqi-Portable-3.20.exe
 别名: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 623104 bytes
-SHA-256: C3406A6848EE5024E99DBB7025D585D7FF15BBFF80D29DDB31D08776F6D9B300
+文件大小: 623616 bytes
+SHA-256: 023BCCCFA7A495B89310A8D3092C221A11BB25D1DE2DBB866F83498BD08E48E8
 
 上一版: Yijian-Xiangqi-3.19.apk
 分支: main
@@ -22,6 +22,8 @@ SHA-256: C3406A6848EE5024E99DBB7025D585D7FF15BBFF80D29DDB31D08776F6D9B300
 本次改动:
   - 新增练习模式：当前行棋方棋子显示五级推荐色环，选中棋子后显示全部合法落点的
     颜色分级和该棋子范围内的 1..N 排名。
+  - 练习颜色按不同分数的候选分组形成排名梯度；同分同色，排名下降时颜色只会
+    向较差方向移动，明显败着仍保留绝对风险下限。
   - 练习强度提供标准、深入两档，并对完整本地排名和皮卡鱼首选分别展示。
   - 皮卡鱼对局中以金色菱形标记皮卡鱼首选，不替换本地完整合法着法排名。
   - 复盘局面可在练习模式中选子查看落点，但不会实际落子；联机与观战禁用练习模式。
@@ -40,8 +42,11 @@ SHA-256: C3406A6848EE5024E99DBB7025D585D7FF15BBFF80D29DDB31D08776F6D9B300
     复盘选子、本地设置迁移和联机禁用全部通过。
   - verify-recommendations-browser：1280x900、1366x768、390x844 三档通过；
     顶部按钮与执子框同高对齐，桌面棋子字号 29px，棋盘进入首屏。
+  - 浏览器联机检查通过：进入房间后练习标记隐藏、练习强度锁定、双方座位锁定为玩家；
+    退出房间后练习控制和座位选择恢复。
   - verify-pikafish、verify-records、verify-motion、verify-styles、verify-quality、
-    verify-mate、verify-compat、verify-net 全部通过。
+    verify-mate、verify-compat、verify-net 全部通过；联机双端握手、走子同步、观战、
+    悔棋、密码房、断线重连和 TURN/STUN 自检通过。
   - EXE 内嵌 9 个前端资源逐一与源码 SHA-256 比对一致。
   - APK 内嵌 9 个前端资源逐一与源码 SHA-256 比对一致。
   - APK versionName=3.20、versionCode=49，包名 com.yijian.xiangqi，签名与 1.5 一致。
