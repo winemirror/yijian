@@ -74,6 +74,11 @@ console.log("== markup and controls ==");
   check("all toolbar actions use icon and label spans",
     (html.match(/class="button-icon"/g) || []).length === 8
     && (html.match(/class="button-label"/g) || []).length === 8);
+  check("side selectors use compact red and black markers",
+    (html.match(/class="side-choice-dot red"/g) || []).length === 1
+    && (html.match(/class="side-choice-dot black"/g) || []).length === 1
+    && html.includes('aria-label="红方执子"')
+    && html.includes('aria-label="黑方执子"'));
   check("recommendation legend exists", html.includes('id="recommendationLegend"'));
   check("legend has five tiers",
     (html.match(/recommendation-swatch/g) || []).length === 5);

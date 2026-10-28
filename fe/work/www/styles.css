@@ -186,6 +186,39 @@ button {
   padding: 0 24px 0 8px;
 }
 
+.topbar .side-choice {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  grid-gap: 0;
+}
+
+.topbar .side-choice select {
+  padding-left: 25px;
+}
+
+.side-choice-dot {
+  width: 10px;
+  height: 10px;
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  border: 1px solid var(--piece-stroke);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.side-choice-dot.red {
+  background: var(--piece-red);
+}
+
+.side-choice-dot.black {
+  background: var(--piece-black);
+}
+
 .topbar .btn,
 .topbar .settings-toggle {
   height: 32px;
