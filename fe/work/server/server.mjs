@@ -23,7 +23,9 @@
 
 import http from "node:http";
 import crypto from "node:crypto";
-import { pathToFileURL } from "node:url";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createGameLibrary } from "./game-library.mjs";
 
 let PORT = Number(process.env.PORT || 8787);
 let HOST = process.env.HOST || "0.0.0.0";
@@ -36,6 +38,11 @@ const MAX_ROOMS = Number(process.env.MAX_ROOMS || 500);
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 30 * 60 * 1000);
 
 const PROTO = 1;
+const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const gameLibrary = createGameLibrary({
+  dataDir: process.env.GAME_LIBRARY_DIR
+    || path.join(SERVER_DIR, "data", "game-library")
+});
 const MAX_FRAME = 128 * 1024;
 const HEARTBEAT_MS = 25000;
 const MAX_ROOMS_PER_CLIENT = 3;
@@ -436,6 +443,11 @@ function takeToken(client) {
 // ---------------------------------------------------------------------- http
 
 const server = http.createServer((request, response) => {
+  const url = new URL(request.url || "/", "http://localhost");
+  if (url.pathname.startsWith("/api/games")) {
+    handleGamesApi(request, response, url);
+    return;
+  }
   if (request.url === "/health") {
     response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     response.end(JSON.stringify({
@@ -445,13 +457,76 @@ const server = http.createServer((request, response) => {
       clients: clients.size,
       ice: iceServers().length,
       stun: STUN_URL ? 1 : 0,
-      turn: turnUrls().length && TURN_SECRET ? turnUrls().length : 0
+      turn: turnUrls().length && TURN_SECRET ? turnUrls().length : 0,
+      games: gameLibrary.health()
     }));
     return;
   }
   response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
   response.end("YiJian signalling server");
 });
+
+function sendJson(response, status, payload) {
+  response.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type"
+  });
+  response.end(JSON.stringify(payload));
+}
+
+function handleGamesApi(request, response, url) {
+  if (request.method === "OPTIONS") {
+    sendJson(response, 204, {});
+    return;
+  }
+  if (request.method !== "GET") {
+    sendJson(response, 405, { ok: false, error: "method_not_allowed" });
+    return;
+  }
+
+  try {
+    if (url.pathname === "/api/games/health") {
+      const health = gameLibrary.health();
+      sendJson(response, health.ok ? 200 : 503, health);
+      return;
+    }
+    if (url.pathname === "/api/games/manifest") {
+      sendJson(response, 200, { ok: true, manifest: gameLibrary.getManifest() });
+      return;
+    }
+    if (url.pathname === "/api/games/search") {
+      const params = Object.fromEntries(url.searchParams.entries());
+      const result = gameLibrary.search(params);
+      sendJson(response, 200, Object.assign({ ok: true }, result));
+      return;
+    }
+    const match = /^\/api\/games\/([^/]+)$/.exec(url.pathname);
+    if (match) {
+      const code = gameLibrary.normalizeCode(decodeURIComponent(match[1]));
+      if (!code) {
+        sendJson(response, 400, { ok: false, error: "invalid_game_code" });
+        return;
+      }
+      const game = gameLibrary.get(code);
+      if (!game) {
+        sendJson(response, 404, { ok: false, error: "game_not_found", code });
+        return;
+      }
+      sendJson(response, 200, { ok: true, game });
+      return;
+    }
+    sendJson(response, 404, { ok: false, error: "not_found" });
+  } catch (error) {
+    sendJson(response, 503, {
+      ok: false,
+      error: "game_library_unavailable",
+      message: error && error.message || String(error)
+    });
+  }
+}
 
 server.on("upgrade", (request, socket) => {
   const key = request.headers["sec-websocket-key"];
@@ -574,6 +649,7 @@ export function close() {
   }
   clients.clear();
   rooms.clear();
+  gameLibrary.close();
   return new Promise((resolve) => server.close(() => resolve()));
 }
 

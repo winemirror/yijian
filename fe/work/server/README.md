@@ -4,10 +4,11 @@
 
 | 做 | 不做 |
 |---|---|
-| 房间登记（建房 / 房间码 / 公开房间列表） | **不碰棋局数据**（走 WebRTC DataChannel） |
-| 信令中转（转发 `offer/answer/ice`，不解析内容） | 不存棋局、不存账号、不写数据库 |
+| 房间登记（建房 / 房间码 / 公开房间列表） | 联机棋局仍走 WebRTC DataChannel |
+| 信令中转（转发 `offer/answer/ice`，不解析内容） | 不存联机棋局、不存账号 |
+| Wukong ICCS 棋谱检索、棋谱号读取与复盘接口 | 不做用户在线对局存档 |
 | 下发 ICE 配置（STUN + coturn REST 临时凭证的 TURN） | 不做内容审核 |
-| 按请求现场签发 TURN 凭证（HMAC-SHA1，分钟级有效） | 不存凭证、不存账号 |
+| 按请求现场签发 TURN 凭证（HMAC-SHA1，分钟级有效） | 不存 TURN 凭证 |
 
 服务端重启只丢房间、不丢数据。所有状态在内存里，`rooms` + `clients` 两个 Map。
 
@@ -25,12 +26,35 @@ node server.mjs
 |---|---|---|
 | `HOST` | `0.0.0.0` | 监听地址 |
 | `PORT` | `8787` | 监听端口 |
+| `GAME_LIBRARY_DIR` | `server/data/game-library` | 在线棋库生成目录 |
 | `STUN_URL` | 空 | 例 `stun:你的域名:3478`。**留空则不下发 STUN → 公网连不上** |
 | `TURN_URL` | 空 | 中继地址，**逗号分隔可给多条**。例 `turn:1.2.3.4:3478?transport=udp,turn:1.2.3.4:3478?transport=tcp` |
 | `TURN_SECRET` | 空 | 必须与 coturn 的 `static-auth-secret` 一致；**留空则不下发 TURN**（只剩直连） |
 | `TURN_TTL` | `600` | 临时凭证有效期（秒），会夹到 60 ~ 86400 |
 | `MAX_ROOMS` | `500` | 同时存在的房间上限 |
 | `ROOM_TTL_MS` | 1800000 | 房间空闲多久后回收 |
+
+## 在线棋库
+
+棋库从 Wukong Xiangqi UCI 大师棋谱导入，棋谱号格式为两位字母加五位数字，
+例如 `WK00223`。输入时会接受 `wk223`、`WK-223` 等简写并自动补全。
+
+```text
+GET /api/games/health
+GET /api/games/manifest
+GET /api/games/search?q=wk223
+GET /api/games/search?red=Lv%20Qin&year=1997&page=1
+GET /api/games/WK00223
+```
+
+生成棋库：
+
+```bash
+node build-game-library.mjs
+```
+
+原始 PGN、生成目录和许可证说明见 `data/README.md`。生成物不进入 Git，
+部署时由 `deploy.sh` 从 `data/game-library` 安装到 `/opt/yijian/data/game-library`。
 
 ## 协议
 
@@ -92,10 +116,13 @@ sudo STUN_HOST=stun:你的IP:3478 \
      PUBLIC_IP=你的公网IP \
      TURN_SECRET=与coturn一致的随机串 \
      INSTALL_COTURN=1 \
+     INSTALL_NGINX=1 \
      bash deploy.sh
 ```
 
-`deploy.sh` 会拷 `server.mjs`、渲染 `/etc/turnserver.conf`（备份原文件）、重启 coturn、
+`deploy.sh` 会拷 `server.mjs`、`game-library.mjs` 和在线棋库、渲染 `/etc/turnserver.conf`
+（备份原文件）、重启 coturn；`INSTALL_NGINX=1` 时会备份并安装
+`nginx-c.syjnb.top.conf`，先执行 `nginx -t` 再 reload、
 写 systemd 单元（含 TURN 环境变量）并自检。不装软件包、不改防火墙。
 
 ### 1. 信令服务
@@ -103,6 +130,7 @@ sudo STUN_HOST=stun:你的IP:3478 \
 ```bash
 # 建议用 systemd 常驻
 Environment=PORT=8787
+Environment=GAME_LIBRARY_DIR=/opt/yijian/data/game-library
 Environment=STUN_URL=stun:你的域名:3478
 Environment=TURN_URL=turn:你的IP:3478?transport=udp,turn:你的IP:3478?transport=tcp
 Environment=TURN_SECRET=与coturn的static-auth-secret一致
@@ -121,6 +149,7 @@ Caddy 两行搞定（自动签证书）：
 yijian.example.com {
     reverse_proxy /ws* 127.0.0.1:8787
     reverse_proxy /health 127.0.0.1:8787
+    reverse_proxy /api/games* 127.0.0.1:8787
 }
 ```
 

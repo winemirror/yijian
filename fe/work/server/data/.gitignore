@@ -1,0 +1,7 @@
+# Generated from the Wukong Xiangqi PGN archive.
+*.zip
+extracted/
+traditional/
+international/
+test-library/
+game-library/

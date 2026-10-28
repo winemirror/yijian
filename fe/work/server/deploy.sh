@@ -12,6 +12,9 @@
 #
 # 环境变量：
 #   PORT            信令端口，默认 8787
+#   GAME_LIBRARY_SOURCE
+#                   棋库生成目录；默认使用脚本旁的 data/game-library
+#   INSTALL_NGINX=1 安装 c.syjnb.top 的 /api/games 反代配置
 #   STUN_HOST       形如 stun:你的域名或IP:3478
 #   PUBLIC_IP       TURN 的公网地址（coturn 的 external-ip，也是 TURN_URL 的默认主机）
 #   TURN_SECRET     TURN 临时凭证密钥，必须与 coturn 的 static-auth-secret 一致
@@ -71,6 +74,20 @@ fi
 echo "==> 安装到 $APP_DIR"
 install -d "$APP_DIR"
 install -m 0644 "$SCRIPT_DIR/server.mjs" "$APP_DIR/server.mjs"
+install -m 0644 "$SCRIPT_DIR/game-library.mjs" "$APP_DIR/game-library.mjs"
+
+GAME_LIBRARY_SOURCE="${GAME_LIBRARY_SOURCE:-$SCRIPT_DIR/data/game-library}"
+if [ -f "$GAME_LIBRARY_SOURCE/catalog.json" ] \
+  && [ -f "$GAME_LIBRARY_SOURCE/games.ndjson" ] \
+  && [ -f "$GAME_LIBRARY_SOURCE/manifest.json" ]; then
+  echo "==> 安装在线棋库"
+  install -d "$APP_DIR/data/game-library"
+  install -m 0644 "$GAME_LIBRARY_SOURCE/catalog.json" "$APP_DIR/data/game-library/catalog.json"
+  install -m 0644 "$GAME_LIBRARY_SOURCE/games.ndjson" "$APP_DIR/data/game-library/games.ndjson"
+  install -m 0644 "$GAME_LIBRARY_SOURCE/manifest.json" "$APP_DIR/data/game-library/manifest.json"
+else
+  echo "==> 未提供在线棋库生成物，保留 $APP_DIR/data/game-library 现有数据"
+fi
 
 if [ "${INSTALL_COTURN:-0}" = "1" ]; then
   if [ -z "$PUBLIC_IP" ] || [ -z "$TURN_SECRET" ]; then
@@ -95,7 +112,8 @@ fi
 
 echo "==> 写 systemd 单元"
 ENV_LINES="Environment=PORT=$PORT
-Environment=STUN_URL=$STUN_HOST"
+Environment=STUN_URL=$STUN_HOST
+Environment=GAME_LIBRARY_DIR=$APP_DIR/data/game-library"
 if [ -n "$TURN_URL" ] && [ -n "$TURN_SECRET" ]; then
   ENV_LINES="$ENV_LINES
 Environment=TURN_URL=$TURN_URL
@@ -124,6 +142,19 @@ systemctl daemon-reload
 systemctl enable yijian-signal >/dev/null
 systemctl restart yijian-signal
 sleep 1
+
+if [ "${INSTALL_NGINX:-0}" = "1" ]; then
+  if [ ! -f "$SCRIPT_DIR/nginx-c.syjnb.top.conf" ]; then
+    echo "INSTALL_NGINX=1 但缺少 nginx-c.syjnb.top.conf" >&2
+    exit 1
+  fi
+  if [ -f /etc/nginx/conf.d/yijian.conf ]; then
+    cp -a /etc/nginx/conf.d/yijian.conf "/etc/nginx/conf.d/yijian.conf.bak.$(date +%s)"
+  fi
+  install -m 0644 "$SCRIPT_DIR/nginx-c.syjnb.top.conf" /etc/nginx/conf.d/yijian.conf
+  nginx -t
+  systemctl reload nginx
+fi
 
 echo "==> 自检"
 if curl -fsS "http://127.0.0.1:$PORT/health"; then

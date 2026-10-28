@@ -88,7 +88,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=3.20.0-20261028">
+  <link rel="stylesheet" href="styles.css?v=3.20.1-20261029">
 </head>
 <body>
   <noscript>
@@ -380,6 +380,46 @@
         </section>
 
         <section id="panel-records" class="panel" aria-label="棋谱库面板">
+          <div class="section-block online-library-block">
+            <div class="section-head">
+              <h2>在线棋库</h2>
+              <span id="onlineLibraryMeta">Wukong · 加载中</span>
+            </div>
+            <form id="onlineGameSearchForm" class="online-game-search">
+              <input id="onlineGameQuery" type="search" maxlength="80" placeholder="棋手拼音/中文名、赛事或棋谱号，如 Lv Qin / 吕钦 / wk223">
+              <button class="btn small primary" type="submit">检索</button>
+            </form>
+            <details class="online-game-filters">
+              <summary>高级筛选</summary>
+              <div class="online-filter-grid">
+                <label class="field">
+                  <span>红方</span>
+                  <input id="onlineGameRed" type="text" maxlength="40" placeholder="Red">
+                </label>
+                <label class="field">
+                  <span>黑方</span>
+                  <input id="onlineGameBlack" type="text" maxlength="40" placeholder="Black">
+                </label>
+                <label class="field">
+                  <span>赛事</span>
+                  <input id="onlineGameEvent" type="text" maxlength="80" placeholder="Event">
+                </label>
+                <label class="field">
+                  <span>年份</span>
+                  <input id="onlineGameYear" type="number" min="1800" max="2100" placeholder="1997">
+                </label>
+              </div>
+            </details>
+            <div id="onlineGameStatus" class="record-status" role="status"></div>
+            <div id="onlineGameList" class="online-game-list">
+              <div class="empty-state">输入棋手、赛事或棋谱号后开始检索。</div>
+            </div>
+            <div class="online-game-pagination">
+              <button id="onlineGamePrev" class="btn small" type="button" disabled>上一页</button>
+              <span id="onlineGamePage">第 1 页</span>
+              <button id="onlineGameNext" class="btn small" type="button" disabled>下一页</button>
+            </div>
+          </div>
           <div class="section-block record-import-block">
             <div class="section-head">
               <h2>本地棋谱</h2>
@@ -515,10 +555,10 @@
     </main>
   </div>
 
-  <script src="ai-data.js?v=3.20.0-20261028"></script>
-  <script src="net.js?v=3.20.0-20261028"></script>
-  <script src="pikafish.js?v=3.20.0-20261028"></script>
-  <script src="records.js?v=3.20.0-20261028"></script>
-  <script src="app.js?v=3.20.0-20261028"></script>
+  <script src="ai-data.js?v=3.20.1-20261029"></script>
+  <script src="net.js?v=3.20.1-20261029"></script>
+  <script src="pikafish.js?v=3.20.1-20261029"></script>
+  <script src="records.js?v=3.20.1-20261029"></script>
+  <script src="app.js?v=3.20.1-20261029"></script>
 </body>
 </html>
