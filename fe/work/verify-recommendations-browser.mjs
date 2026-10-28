@@ -50,7 +50,11 @@ async function exerciseViewport(browser, name, viewport) {
     depth: window.XiangqiLocal.state.recommendation.depth,
     markedPieces: document.querySelectorAll(".piece[data-recommend-tier]").length,
     topPieces: document.querySelectorAll('.piece[data-recommend-top="1"]').length,
-    legendHidden: document.getElementById("recommendationLegend").hidden
+    legendHidden: document.getElementById("recommendationLegend").hidden,
+    practiceText: document.getElementById("recommendationToggle").textContent.trim(),
+    topbarHeight: document.querySelector(".topbar").getBoundingClientRect().height,
+    boardBottom: document.getElementById("board").getBoundingClientRect().bottom,
+    viewportHeight: window.innerHeight
   }));
   check(`${name}: initial ranking is ready`, state.status === "ready", state.status);
   check(`${name}: all initial legal moves are covered`, state.moves === 44, String(state.moves));
@@ -58,6 +62,79 @@ async function exerciseViewport(browser, name, viewport) {
   check(`${name}: current-side pieces have rings`, state.markedPieces >= 10, String(state.markedPieces));
   check(`${name}: one best piece has a badge`, state.topPieces === 1, String(state.topPieces));
   check(`${name}: legend is visible`, state.legendHidden === false);
+  check(`${name}: toggle is named practice`, state.practiceText.includes("练习"));
+  if (name === "desktop" || name === "laptop") {
+    check(`${name}: topbar remains compact`, state.topbarHeight <= 60, String(state.topbarHeight));
+    check(`${name}: complete board fits in the viewport`,
+      state.boardBottom <= state.viewportHeight,
+      `${state.boardBottom}/${state.viewportHeight}`);
+  }
+
+  const pikafishMarkers = await page.evaluate(() => {
+    const local = window.XiangqiLocal;
+    const recommendation = local.state.recommendation;
+    const entry = recommendation.moves[2];
+    recommendation.pikafishBest = {
+      move: entry.move,
+      score: entry.score,
+      evalRed: entry.evalRed,
+      winRed: entry.winRed,
+      depth: 12,
+      localRank: entry.rank,
+      tier: entry.tier
+    };
+    local.state.selected = entry.move.from;
+    local.state.legalMoves = local.generateLegalMoves(
+      local.state.game.board,
+      local.state.game.sideToMove
+    ).filter((move) => move.from === entry.move.from);
+    local.renderPieces();
+    local.updateRecommendationUI();
+    return {
+      pieces: document.querySelectorAll(".pikafish-best-marker").length,
+      hints: document.querySelectorAll(".hint[data-pikafish-best='1']").length,
+      legendVisible: document.getElementById("pikafishLegend").hidden === false
+    };
+  });
+  check(`${name}: Pikafish first choice renders on piece and target`,
+    pikafishMarkers.pieces === 1
+      && pikafishMarkers.hints >= 1
+      && pikafishMarkers.legendVisible,
+    JSON.stringify(pikafishMarkers));
+  if (name === "desktop") {
+    const pikafishScreenshot = path.join(artifactDir, "yijian-pikafish-marker-desktop.png");
+    await page.screenshot({ path: pikafishScreenshot, fullPage: false });
+    console.log(`  Pikafish marker screenshot: ${pikafishScreenshot}`);
+  }
+  await page.evaluate(() => {
+    window.XiangqiLocal.state.recommendation.pikafishBest = null;
+    window.XiangqiLocal.state.selected = null;
+    window.XiangqiLocal.state.legalMoves = [];
+    window.XiangqiLocal.renderPieces();
+    window.XiangqiLocal.updateRecommendationUI();
+  });
+
+  await page.locator(".topbar-more summary").click();
+  if (name === "desktop") {
+    const menuScreenshot = path.join(artifactDir, "yijian-practice-menu-desktop.png");
+    await page.screenshot({ path: menuScreenshot, fullPage: false });
+    console.log(`  menu screenshot: ${menuScreenshot}`);
+  }
+  await page.locator("#practiceDepth").selectOption("deep");
+  await page.waitForFunction(() => window.XiangqiLocal.state.practiceLevel === "deep");
+  await page.waitForFunction(() => window.XiangqiLocal.state.recommendation.status === "ready");
+  const practice = await page.evaluate(() => ({
+    level: window.XiangqiLocal.state.practiceLevel,
+    stored: localStorage.getItem("xiangqi.practice.level"),
+    depth: window.XiangqiLocal.state.recommendation.depth
+  }));
+  check(`${name}: deep practice mode is applied`,
+    practice.level === "deep"
+      && practice.stored === "deep"
+      && practice.depth >= 3,
+    JSON.stringify(practice));
+  check(`${name}: practice menu closes after selection`,
+    await page.evaluate(() => document.querySelector(".topbar-more").open === false));
 
   const targetSelection = await page.evaluate(() => {
     const state = window.XiangqiLocal.state;
@@ -140,7 +217,7 @@ async function exerciseViewport(browser, name, viewport) {
   await page.locator("#recommendationToggle").click();
   const disabled = await page.evaluate(() => ({
     enabled: window.XiangqiLocal.state.recommendationEnabled,
-    stored: localStorage.getItem("xiangqi.recommendation.enabled"),
+    stored: localStorage.getItem("xiangqi.practice.enabled"),
     marked: document.querySelectorAll(".piece[data-recommend-tier]").length
   }));
   check(`${name}: toggle clears recommendation rings`, disabled.marked === 0, String(disabled.marked));
@@ -168,6 +245,7 @@ const browser = await chromium.launch({
 });
 try {
   await exerciseViewport(browser, "desktop", { width: 1280, height: 900 });
+  await exerciseViewport(browser, "laptop", { width: 1366, height: 768 });
   await exerciseViewport(browser, "mobile", { width: 390, height: 844 });
 } finally {
   await browser.close();

@@ -147,7 +147,22 @@
     checkExtension: true,
     lmr: true
   };
-  const RECOMMENDATION_PREF_KEY = "xiangqi.recommendation.enabled";
+  const PRACTICE_ANALYSIS_LEVELS = {
+    standard: RECOMMENDATION_LEVEL,
+    deep: {
+      depth: 4,
+      timeMs: 1900,
+      nodeLimit: 170000,
+      candidates: 64,
+      nullMove: true,
+      pvs: true,
+      checkExtension: true,
+      lmr: true
+    }
+  };
+  const PRACTICE_PREF_KEY = "xiangqi.practice.enabled";
+  const LEGACY_RECOMMENDATION_PREF_KEY = "xiangqi.recommendation.enabled";
+  const PRACTICE_LEVEL_PREF_KEY = "xiangqi.practice.level";
   const RECOMMENDATION_TIERS = [
     { key: "best", label: "最优" },
     { key: "good", label: "好" },
@@ -2621,6 +2636,9 @@
     recommendationToggle: document.getElementById("recommendationToggle"),
     recommendationLegend: document.getElementById("recommendationLegend"),
     recommendationLegendStatus: document.getElementById("recommendationLegendStatus"),
+    pikafishLegend: document.getElementById("pikafishLegend"),
+    practiceDepth: document.getElementById("practiceDepth"),
+    topbarMore: document.querySelector(".topbar-more"),
     newGame: document.getElementById("newGame"),
     undoMove: document.getElementById("undoMove"),
     redLabel: document.getElementById("redLabel"),
@@ -2719,6 +2737,7 @@
     reviewPly: 0,
     displayAnalysis: null,
     recommendationEnabled: true,
+    practiceLevel: "standard",
     recommendation: {
       status: "idle",
       key: "",
@@ -3181,7 +3200,10 @@
 
   function loadRecommendationSetting() {
     try {
-      const raw = window.localStorage.getItem(RECOMMENDATION_PREF_KEY);
+      const practiceValue = window.localStorage.getItem(PRACTICE_PREF_KEY);
+      const raw = practiceValue === null
+        ? window.localStorage.getItem(LEGACY_RECOMMENDATION_PREF_KEY)
+        : practiceValue;
       if (raw === "0") return false;
       if (raw === "1") return true;
     } catch (error) {
@@ -3192,10 +3214,35 @@
 
   function saveRecommendationSetting(enabled) {
     try {
-      window.localStorage.setItem(RECOMMENDATION_PREF_KEY, enabled ? "1" : "0");
+      window.localStorage.setItem(PRACTICE_PREF_KEY, enabled ? "1" : "0");
     } catch (error) {
       // 存不了不影响本次使用。
     }
+  }
+
+  function loadPracticeLevel() {
+    try {
+      const value = window.localStorage.getItem(PRACTICE_LEVEL_PREF_KEY);
+      if (Object.prototype.hasOwnProperty.call(PRACTICE_ANALYSIS_LEVELS, value)) {
+        return value;
+      }
+    } catch (error) {
+      // 存储不可用时使用标准强度。
+    }
+    return "standard";
+  }
+
+  function savePracticeLevel(level) {
+    try {
+      window.localStorage.setItem(PRACTICE_LEVEL_PREF_KEY, level);
+    } catch (error) {
+      // 存不了不影响本次使用。
+    }
+  }
+
+  function practiceAnalysisLevel() {
+    return PRACTICE_ANALYSIS_LEVELS[state.practiceLevel]
+      || PRACTICE_ANALYSIS_LEVELS.standard;
   }
 
   function recommendationVisible() {
@@ -3349,7 +3396,7 @@
   }
 
   function recommendationBaseKey(board, side) {
-    return `${computeHash(board, side).toString(36)}:${side}:rec`;
+    return `${computeHash(board, side).toString(36)}:${side}:practice:${state.practiceLevel}`;
   }
 
   function cacheRecommendationAnalysis(board, side, analysis) {
@@ -3379,6 +3426,69 @@
     return null;
   }
 
+  function availablePikafishAnalysis(board, side, ply) {
+    const candidates = [];
+    if (state.live && ply === state.game.history.length) {
+      candidates.push(state.displayAnalysis);
+    }
+    if (ply > 0) {
+      const record = state.game.history[ply - 1];
+      if (record) candidates.push(record.afterAnalysis);
+    }
+    const legalByCode = new Map(
+      generateLegalMoves(board, side).map((move) => [moveCode(move), move])
+    );
+    for (const analysis of candidates) {
+      if (
+        !analysis
+        || analysis.side !== side
+        || (analysis.engine !== "pikafish" && !analysis.cloud)
+      ) {
+        continue;
+      }
+      const best = recommendationMoves(analysis)
+        .filter((entry) => (
+          entry
+          && entry.move
+          && legalByCode.has(moveCode(entry.move))
+        ))
+        .sort((a, b) => Number(b.score) - Number(a.score))[0];
+      if (best) return {
+        analysis,
+        candidate: best,
+        move: legalByCode.get(moveCode(best.move))
+      };
+    }
+    return null;
+  }
+
+  function attachPikafishBest(recommendation, board, side, ply) {
+    if (!recommendation || recommendation.status !== "ready") return recommendation;
+    const source = availablePikafishAnalysis(board, side, ply);
+    if (!source) return recommendation;
+    const code = moveCode(source.move);
+    const localMove = recommendation.moveByCode[code] || null;
+    recommendation.pikafishBest = {
+      move: source.move,
+      score: Number(source.candidate.score) || 0,
+      evalRed: Number(source.candidate.evalRed) || 0,
+      winRed: Number(source.candidate.winRed) || 50,
+      depth: Number(source.candidate.depth || source.analysis.depth || 0),
+      localRank: localMove ? localMove.rank : 0,
+      tier: localMove ? localMove.tier : 0
+    };
+    return recommendation;
+  }
+
+  function finalizeRecommendation(board, side, analysis, key, ply) {
+    return attachPikafishBest(
+      buildRecommendation(board, side, analysis, key, ply),
+      board,
+      side,
+      ply
+    );
+  }
+
   function stopRecommendationTimer(advanceToken = true) {
     if (recommendationTimer) {
       window.clearTimeout(recommendationTimer);
@@ -3403,7 +3513,14 @@
     const key = recommendationBaseKey(board, side);
     if (
       state.recommendation.key === key
-      && ["ready", "loading", "error"].includes(state.recommendation.status)
+      && state.recommendation.status === "ready"
+    ) {
+      attachPikafishBest(state.recommendation, board, side, ply);
+      return;
+    }
+    if (
+      state.recommendation.key === key
+      && ["loading", "error"].includes(state.recommendation.status)
     ) {
       return;
     }
@@ -3412,12 +3529,12 @@
     const analysis = availableRecommendationAnalysis(board, side, ply);
     if (analysis) {
       cacheRecommendationAnalysis(board, side, analysis);
-      state.recommendation = buildRecommendation(board, side, analysis, key, ply);
+      state.recommendation = finalizeRecommendation(board, side, analysis, key, ply);
       return;
     }
     const cached = recommendationCache.get(key);
     if (cached && analysisCoversAllMoves(board, side, cached)) {
-      state.recommendation = buildRecommendation(board, side, cached, key, ply);
+      state.recommendation = finalizeRecommendation(board, side, cached, key, ply);
       return;
     }
 
@@ -3461,10 +3578,11 @@
         return;
       }
       try {
+        const practiceLevel = practiceAnalysisLevel();
         const analysis = await analyzePositionScheduled(
           board,
           side,
-          Object.assign({}, RECOMMENDATION_LEVEL, { forceLocal: true, candidates: 64 }),
+          Object.assign({}, practiceLevel, { forceLocal: true, candidates: 64 }),
           historyMoves
         );
         if (token !== recommendationToken || key !== state.recommendation.key) return;
@@ -3472,7 +3590,7 @@
           throw new Error("推荐分析未覆盖全部合法着法");
         }
         cacheRecommendationAnalysis(board, side, analysis);
-        state.recommendation = buildRecommendation(board, side, analysis, key, ply);
+        state.recommendation = finalizeRecommendation(board, side, analysis, key, ply);
         document.documentElement.dataset.recommendationDepth =
           String(state.recommendation.depth);
         document.documentElement.dataset.recommendationMoves =
@@ -3507,20 +3625,33 @@
         state.recommendationEnabled ? "true" : "false"
       );
       elements.recommendationToggle.title = blockedByNet
-        ? "联机对局中不提供引擎推荐"
-        : (state.recommendationEnabled ? "关闭推荐标记" : "开启推荐标记");
+        ? "联机对局中不提供练习模式"
+        : (state.recommendationEnabled ? "关闭练习模式" : "开启练习模式");
+      elements.recommendationToggle.setAttribute(
+        "aria-label",
+        state.recommendationEnabled ? "练习模式已开启" : "练习模式已关闭"
+      );
+    }
+    if (elements.practiceDepth) {
+      elements.practiceDepth.value = state.practiceLevel;
+      elements.practiceDepth.disabled = blockedByNet;
     }
     if (elements.recommendationLegend) {
       elements.recommendationLegend.hidden = !visible;
     }
+    if (elements.pikafishLegend) {
+      elements.pikafishLegend.hidden = !visible
+        || !state.recommendation.pikafishBest;
+    }
     if (elements.recommendationLegendStatus) {
       if (state.recommendation.status === "loading") {
-        elements.recommendationLegendStatus.textContent = "完整分析中";
+        elements.recommendationLegendStatus.textContent = "练习分析中";
       } else if (state.recommendation.status === "error") {
-        elements.recommendationLegendStatus.textContent = "分析失败";
+        elements.recommendationLegendStatus.textContent = "练习分析失败";
       } else if (state.recommendation.status === "ready") {
+        const levelLabel = state.practiceLevel === "deep" ? "深入" : "标准";
         elements.recommendationLegendStatus.textContent =
-          `深度 ${state.recommendation.depth} · ${state.recommendation.legalCount} 手`;
+          `练习 ${levelLabel} · 深度 ${state.recommendation.depth} · ${state.recommendation.legalCount} 手`;
       } else {
         elements.recommendationLegendStatus.textContent = "";
       }
@@ -3529,17 +3660,33 @@
 
   function toggleRecommendation() {
     if (netActive()) {
-      setStatus("联机对局中不提供引擎推荐");
+      setStatus("联机对局中不提供练习模式");
       return;
     }
     state.recommendationEnabled = !state.recommendationEnabled;
     saveRecommendationSetting(state.recommendationEnabled);
     stopRecommendationTimer();
+    if (!state.recommendationEnabled) {
+      state.selected = null;
+      state.legalMoves = [];
+    }
     state.recommendation = emptyRecommendation(
       state.recommendationEnabled ? "idle" : "hidden"
     );
     render();
-    setStatus(state.recommendationEnabled ? "推荐标记已开启" : "推荐标记已关闭");
+    setStatus(state.recommendationEnabled ? "练习模式已开启" : "练习模式已关闭");
+  }
+
+  function setPracticeLevel(level) {
+    if (!Object.prototype.hasOwnProperty.call(PRACTICE_ANALYSIS_LEVELS, level)) return;
+    state.practiceLevel = level;
+    savePracticeLevel(level);
+    stopRecommendationTimer();
+    state.recommendation = emptyRecommendation(
+      state.recommendationEnabled ? "idle" : "hidden"
+    );
+    render();
+    setStatus(level === "deep" ? "练习分析强度：深入" : "练习分析强度：标准");
   }
 
   function render() {
@@ -3752,6 +3899,9 @@
     const recommendationReady = recommendation
       && recommendation.status === "ready"
       && recommendation.side === currentSide;
+    const pikafishBestMove = recommendationReady && recommendation.pikafishBest
+      ? recommendation.pikafishBest.move
+      : null;
 
     for (let index = 0; index < 90; index += 1) {
       const piece = board[index];
@@ -3785,6 +3935,21 @@
           ariaLabel += "，无合法走法";
         }
       }
+      if (
+        pikafishBestMove
+        && pikafishBestMove.from === index
+        && piece.side === currentSide
+      ) {
+        button.dataset.pikafishBest = "1";
+        ariaLabel += "，皮卡鱼首选";
+        const marker = document.createElement("span");
+        marker.className = "pikafish-best-marker";
+        marker.setAttribute("aria-hidden", "true");
+        button.appendChild(marker);
+        button.title = recommendation.pikafishBest.depth
+          ? `皮卡鱼首选 · 深度 ${recommendation.pikafishBest.depth}`
+          : "皮卡鱼首选";
+      }
       button.setAttribute("aria-label", ariaLabel);
 
       if (state.selected === index) button.classList.add("selected");
@@ -3797,6 +3962,14 @@
       ) {
         button.classList.add("playable");
       }
+      if (
+        !state.live
+        && !state.busy
+        && recommendationVisible()
+        && piece.side === currentSide
+      ) {
+        button.classList.add("practice-inspect");
+      }
 
       const lastRecord = displayedPly > 0 ? state.game.history[displayedPly - 1] : null;
       if (lastRecord && (lastRecord.from === index || lastRecord.to === index)) {
@@ -3808,7 +3981,9 @@
       clearChildren(elements.pieces);
       elements.pieces.appendChild(fragment);
       clearChildren(elements.moveHints);
-    if (!state.live || state.busy || state.game.result.type !== "ongoing") return;
+    if (state.busy) return;
+    if (state.live && state.game.result.type !== "ongoing") return;
+    if (!state.live && !recommendationVisible()) return;
 
     const hintFragment = document.createDocumentFragment();
     const targetRanks = new Map();
@@ -3837,6 +4012,13 @@
         hint.dataset.recommendGlobalRank = String(recommendationMove.rank);
         hint.title =
           `${recommendationMove.tierLabel} · 损失 ${Math.round(recommendationMove.lossCp)}`;
+      }
+      if (pikafishBestMove && moveCode(pikafishBestMove) === moveCode(move)) {
+        hint.classList.add("pikafish-best");
+        hint.dataset.pikafishBest = "1";
+        hint.title =
+          `${hint.title || (recommendationMove ? recommendationMove.tierLabel : "首选")}`
+          + " · 皮卡鱼首选";
       }
       hint.setAttribute("aria-hidden", "true");
       hint.style.setProperty("--x", String(displayCol(move.to % 9)));
@@ -4209,7 +4391,24 @@
 
   function selectPiece(square) {
     if (!state.live) {
-      setStatus("复盘状态，请先回到当前局面");
+      if (!recommendationVisible()) {
+        setStatus("复盘状态，请先回到当前局面");
+        return;
+      }
+      if (state.busy) return;
+      const reviewSide = sideForPly(currentPly());
+      const reviewPiece = currentBoard()[square];
+      if (!reviewPiece || reviewPiece.side !== reviewSide) {
+        state.selected = null;
+        state.legalMoves = [];
+        render();
+        return;
+      }
+      state.selected = square;
+      state.legalMoves = generateLegalMoves(currentBoard(), reviewSide)
+        .filter((move) => move.from === square);
+      playSound("pickup");
+      render();
       return;
     }
     if (state.busy || state.game.result.type !== "ongoing") return;
@@ -4655,7 +4854,29 @@
   }
 
   function boardClick(event) {
-    if (!state.live || state.busy || state.game.result.type !== "ongoing") return;
+    if (state.busy) return;
+    if (!state.live) {
+      if (!recommendationVisible()) return;
+      const reviewPiece = event.target.closest(".piece");
+      if (reviewPiece) {
+        selectPiece(Number(reviewPiece.dataset.square));
+        return;
+      }
+      if (state.selected !== null) {
+        const targetSquare = pointToSquare(event);
+        if (
+          targetSquare !== null
+          && state.legalMoves.some((move) => move.to === targetSquare)
+        ) {
+          return;
+        }
+        state.selected = null;
+        state.legalMoves = [];
+        render();
+      }
+      return;
+    }
+    if (state.game.result.type !== "ongoing") return;
     if (!canPlayNow()) return;
     const pieceElement = event.target.closest(".piece");
     if (pieceElement) {
@@ -4712,6 +4933,12 @@
     state.autoSpeed = elements.autoSpeed.value;
     refreshAnimationFlag();
   });
+  if (elements.practiceDepth) {
+    elements.practiceDepth.addEventListener("change", () => {
+      setPracticeLevel(elements.practiceDepth.value);
+      if (elements.topbarMore) elements.topbarMore.open = false;
+    });
+  }
   elements.redColor.addEventListener("input", () => {
     savePieceColors(pieceColorsFromInputs());
   });
@@ -4724,6 +4951,20 @@
   elements.blackSetup.addEventListener("change", () => {
     onSetupChange(BLACK, elements.blackSetup.value);
   });
+  if (elements.topbarMore) {
+    document.addEventListener("click", (event) => {
+      if (elements.topbarMore.open && !elements.topbarMore.contains(event.target)) {
+        elements.topbarMore.open = false;
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && elements.topbarMore.open) {
+        elements.topbarMore.open = false;
+        const summary = elements.topbarMore.querySelector("summary");
+        if (summary) summary.focus();
+      }
+    });
+  }
 
   function activatePanel(name) {
     const panelId = `panel-${name}`;
@@ -7070,6 +7311,7 @@
     PIKAFISH_LEVELS,
     ANALYSIS_LEVEL,
     RECOMMENDATION_LEVEL,
+    PRACTICE_ANALYSIS_LEVELS,
     RECOMMENDATION_TIERS,
     isPikafishLevel,
     levelLabel,
@@ -7090,13 +7332,18 @@
     DEFAULT_PIECE_COLORS,
     toggleBoardFlip,
     renderPieces,
+    selectPiece,
     pointToSquare,
     renderMoveLine,
     renderMoveTicker,
     recommendationVisible,
     analysisCoversAllMoves,
     buildRecommendation,
+    attachPikafishBest,
+    practiceAnalysisLevel,
+    setPracticeLevel,
     syncRecommendationFromAvailableData,
+    updateRecommendationUI,
     toggleRecommendation,
     sideForPly,
     Records,
@@ -7330,6 +7577,7 @@
   state.soundOn = loadSoundSetting();
   state.flipped = loadFlipSetting() === true;
   state.recommendationEnabled = loadRecommendationSetting();
+  state.practiceLevel = loadPracticeLevel();
   resetGame();
   refreshRecordLibrary();
   netInit();

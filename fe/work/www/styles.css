@@ -83,12 +83,14 @@ button {
 }
 
 .topbar {
-  min-height: 78px;
-  padding: 12px 24px;
-  padding: 12px clamp(16px, 3vw, 42px);
+  min-height: 54px;
+  padding: 6px 16px;
+  padding: 6px clamp(12px, 1.8vw, 26px);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 14px;
+  grid-gap: 14px;
   background: rgb(251 250 247 / 92%);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(16px);
@@ -100,12 +102,14 @@ button {
 .brand {
   display: flex;
   align-items: center;
-  min-width: 230px;
+  min-width: 176px;
+  flex: 0 0 auto;
 }
 
 .brand-mark {
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -115,29 +119,172 @@ button {
   background: var(--red);
   box-shadow: inset 0 0 0 3px #e8c59a, 0 4px 10px rgb(73 39 24 / 18%);
   font-family: var(--piece-font);
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
 }
 
 .brand h1 {
   margin: 0;
   font-family: var(--piece-font);
-  font-size: 24px;
+  font-size: 20px;
   line-height: 1;
   letter-spacing: 0.08em;
 }
 
 .brand p {
-  margin: 5px 0 0;
+  margin: 3px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 10px;
+  line-height: 1.2;
 }
 
 .topbar-controls {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  gap: 7px;
+  grid-gap: 7px;
+}
+
+.side-controls,
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  grid-gap: 6px;
+}
+
+.side-controls {
+  flex: 0 1 auto;
+}
+
+.topbar-actions {
+  flex: 0 0 auto;
+}
+
+.topbar .field {
+  gap: 1px;
+  grid-gap: 1px;
+}
+
+.topbar .field > span {
+  padding-left: 3px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.topbar select {
+  height: 32px;
+  font-size: 12px;
+}
+
+.field-compact select {
+  width: 118px;
+  min-width: 118px;
+  padding: 0 24px 0 8px;
+}
+
+.topbar .btn {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.topbar-actions .compact-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  grid-gap: 5px;
+}
+
+.topbar-actions .compact-action span:first-child {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.topbar .btn.toolbar-icon,
+.topbar .btn.play-toggle,
+.topbar .btn.sound-toggle,
+.settings-toggle {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.topbar-more {
+  position: relative;
+  margin: 0;
+}
+
+.settings-toggle {
+  list-style: none;
+  cursor: pointer;
+}
+
+.settings-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.topbar-more[open] .settings-toggle {
+  border-color: #8d8478;
+  background: #f1eee7;
+}
+
+.topbar-menu {
+  width: 270px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 30;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+  grid-gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 14px 32px rgb(40 32 20 / 18%);
+}
+
+.topbar-menu-section {
+  display: grid;
+  gap: 6px;
+  grid-gap: 6px;
+}
+
+.topbar-menu-section > strong {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.topbar-menu-section select {
+  width: 100%;
+}
+
+.topbar-menu-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  grid-gap: 8px;
+}
+
+.topbar-menu .color-field {
+  justify-items: stretch;
+}
+
+.topbar-menu input[type="color"] {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
 }
 
 .field {
@@ -284,7 +431,7 @@ select:focus {
 
 .workspace {
   width: min(1460px, calc(100% - 32px));
-  margin: 24px auto 42px;
+  margin: 10px auto 30px;
   display: grid;
   grid-template-columns: minmax(520px, 1fr) minmax(360px, 430px);
   align-items: start;
@@ -303,6 +450,7 @@ select:focus {
 
 .player-strip {
   width: min(100%, 720px);
+  width: min(100%, 720px, calc((100vh - 154px) * .9));
   min-height: 58px;
   padding: 10px 14px;
   display: flex;
@@ -411,6 +559,7 @@ select:focus {
 
 .board-stage {
   width: min(100%, 720px);
+  width: min(100%, 720px, calc((100vh - 154px) * .9));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -418,6 +567,7 @@ select:focus {
 
 .board {
   width: min(100%, 720px);
+  width: min(100%, 720px, calc((100vh - 154px) * .9));
   /* aspect-ratio is Chromium 88+; this spacer gives the same 9:10 box. */
   min-height: 0;
   position: relative;
@@ -526,8 +676,17 @@ select:focus {
   cursor: pointer;
 }
 
+.piece.practice-inspect {
+  cursor: pointer;
+}
+
 .piece.playable:hover {
   --scale: 1.05;
+  filter: brightness(1.03);
+}
+
+.piece.practice-inspect:hover {
+  --scale: 1.04;
   filter: brightness(1.03);
 }
 
@@ -633,6 +792,19 @@ select:focus {
   font-size: 10px;
   font-weight: 800;
   line-height: 1;
+  pointer-events: none;
+}
+
+.pikafish-best-marker {
+  width: 13px;
+  height: 13px;
+  position: absolute;
+  left: -8px;
+  top: -8px;
+  border: 2px solid #fff;
+  background: var(--gold);
+  box-shadow: 0 2px 6px rgb(31 29 26 / 28%);
+  transform: rotate(45deg);
   pointer-events: none;
 }
 
@@ -763,6 +935,19 @@ select:focus {
   left: 85%;
   top: 15%;
   transform: translate(-50%, -50%);
+}
+
+.hint.pikafish-best::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  position: absolute;
+  left: 20%;
+  top: 20%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  border: 1px solid #fff;
+  background: var(--gold);
+  box-shadow: 0 1px 4px rgb(31 29 26 / 24%);
 }
 
 /* Victory banner: slides in over the board, stays until a new game or an undo. */
@@ -940,6 +1125,7 @@ select:focus {
 
 .game-status {
   width: min(100%, 720px);
+  width: min(100%, 720px, calc((100vh - 154px) * .9));
   margin-top: 12px;
   padding: 11px 14px;
   display: flex;
@@ -1088,6 +1274,20 @@ select:focus {
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
+}
+
+.recommendation-legend-item[hidden] {
+  display: none;
+}
+
+.recommendation-diamond {
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border: 1px solid rgb(255 255 255 / 75%);
+  background: var(--gold);
+  box-shadow: 0 0 0 1px rgb(31 29 26 / 12%);
+  transform: rotate(45deg);
 }
 
 .recommendation-swatch {
@@ -1977,11 +2177,6 @@ select:focus {
   margin-bottom: 0;
 }
 
-.topbar-controls > * {
-  margin-right: 10px;
-  margin-bottom: 10px;
-}
-
 .captured > * {
   margin-right: 2px;
   margin-bottom: 2px;
@@ -2028,18 +2223,59 @@ select:focus {
 @media (max-width: 720px) {
   .topbar {
     position: static;
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
+    gap: 6px;
+    grid-gap: 6px;
+    padding: 8px 10px;
   }
 
   .topbar > * + * {
     margin-left: 0;
-    margin-top: 12px;
+    margin-top: 6px;
   }
 
   .topbar-controls {
     width: 100%;
+    align-items: stretch;
+    flex-direction: column;
     justify-content: flex-start;
+    gap: 6px;
+    grid-gap: 6px;
+  }
+
+  .side-controls {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .field-compact select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .topbar-actions > *,
+  .topbar-actions .btn,
+  .topbar-actions .settings-toggle {
+    width: 100%;
+  }
+
+  .topbar-more[open] {
+    grid-column: 1 / -1;
+  }
+
+  .topbar-menu {
+    width: 100%;
+    position: static;
+    margin-top: 6px;
+    box-shadow: none;
   }
 
   .field {
@@ -2107,12 +2343,7 @@ select:focus {
   }
 
   .topbar-controls {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .topbar-controls .btn {
-    width: 100%;
+    display: flex;
   }
 
   .player-main span:not(.stone) {

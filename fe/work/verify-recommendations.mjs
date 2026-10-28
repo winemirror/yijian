@@ -9,7 +9,7 @@ const engine = loadEngine(
   path.join(here, "ai-data.js"),
   {
     beforeEngine(sandbox, win) {
-      win.localStorage.setItem("xiangqi.recommendation.enabled", "0");
+      win.localStorage.setItem("xiangqi.practice.enabled", "0");
     }
   }
 );
@@ -64,6 +64,13 @@ function flatten(root) {
 console.log("== markup and controls ==");
 {
   check("recommendation toggle exists", html.includes('id="recommendationToggle"'));
+  check("toggle is presented as practice mode",
+    /id="recommendationToggle"[^>]*>[\s\S]*?练习/.test(html));
+  check("practice strength control exists", html.includes('id="practiceDepth"'));
+  check("appearance controls moved into a compact menu",
+    html.includes('class="topbar-more"')
+    && html.includes('id="redColor"')
+    && html.includes('id="autoSpeed"'));
   check("recommendation legend exists", html.includes('id="recommendationLegend"'));
   check("legend has five tiers",
     (html.match(/recommendation-swatch/g) || []).length === 5);
@@ -76,6 +83,10 @@ console.log("== markup and controls ==");
   check("target ranks use a text label", /data-recommend-rank/.test(css));
   check("recommendation layer stays above pieces",
     /\.move-hints\s*\{[^}]*z-index:\s*4/.test(css));
+  check("topbar is compact",
+    /\.topbar\s*\{[^}]*min-height:\s*54px/.test(css));
+  check("board width responds to viewport height",
+    /\.board\s*\{[^}]*calc\(\(100vh - 154px\) \* \.9\)/.test(css));
 }
 
 console.log("== complete ranking ==");
@@ -106,6 +117,74 @@ console.log("== complete ranking ==");
   check("piece ranks start at one",
     Math.min(...Object.values(result.pieces).map((piece) => piece.rank)) === 1);
   check("analysis result is marked complete", result.complete === true);
+}
+
+console.log("== practice strength and Pikafish hybrid ==");
+{
+  engine.state.recommendationEnabled = true;
+  engine.state.busy = true;
+  engine.setPracticeLevel("deep");
+  check("deep practice level is stored",
+    engine.state.practiceLevel === "deep"
+    && engine.__window.localStorage.getItem("xiangqi.practice.level") === "deep");
+  check("deep level uses its own analysis budget",
+    engine.practiceAnalysisLevel().depth === 4
+    && engine.practiceAnalysisLevel().timeMs > engine.RECOMMENDATION_LEVEL.timeMs);
+
+  const board = engine.initialBoard();
+  const localAnalysis = syntheticAnalysis(board, RED, { step: 90 });
+  const recommendation = engine.buildRecommendation(
+    board,
+    RED,
+    localAnalysis,
+    "hybrid-test",
+    0
+  );
+  const preferred = localAnalysis.moveScores[4];
+  engine.state.displayAnalysis = {
+    side: RED,
+    engine: "pikafish",
+    cloud: true,
+    depth: 12,
+    moveScores: [{
+      move: preferred.move,
+      score: preferred.score,
+      evalRed: preferred.evalRed,
+      winRed: preferred.winRed,
+      depth: 12
+    }]
+  };
+  engine.attachPikafishBest(recommendation, board, RED, 0);
+  check("Pikafish first choice is attached without replacing local ranking",
+    recommendation.pikafishBest
+    && recommendation.pikafishBest.move.from === preferred.move.from
+    && recommendation.pikafishBest.move.to === preferred.move.to
+    && recommendation.moves.length === localAnalysis.moveScores.length);
+
+  engine.state.recommendation = recommendation;
+  const pieces = engine.__document.getElementById("pieces");
+  pieces.children.length = 0;
+  engine.renderPieces();
+  const marker = flatten(pieces).find((node) => node.dataset.pikafishBest === "1");
+  check("Pikafish first choice has a separate marker", !!marker);
+  engine.state.busy = false;
+  engine.state.selected = preferred.move.from;
+  engine.state.legalMoves = engine.generateLegalMoves(board, RED)
+    .filter((move) => move.from === preferred.move.from);
+  const hints = engine.__document.getElementById("moveHints");
+  hints.children.length = 0;
+  engine.renderPieces();
+  const preferredHint = flatten(hints)
+    .find((node) => node.dataset && node.dataset.pikafishBest === "1");
+  check("Pikafish first choice is marked on its target", !!preferredHint);
+  engine.state.selected = null;
+  engine.state.legalMoves = [];
+
+  engine.setPracticeLevel("standard");
+  engine.state.displayAnalysis = null;
+  check("standard practice level restores default budget",
+    engine.practiceAnalysisLevel().depth === 3
+    && engine.__window.localStorage.getItem("xiangqi.practice.level") === "standard");
 }
 
 console.log("== threshold and perspective handling ==");
@@ -167,6 +246,18 @@ console.log("== render integration ==");
       .sort((a, b) => a - b)
       .every((rank, index) => rank === index + 1));
 
+  engine.state.live = false;
+  engine.state.reviewPly = 0;
+  engine.state.selected = null;
+  engine.state.legalMoves = [];
+  engine.selectPiece(legal[0].from);
+  check("practice mode can inspect a historical position",
+    engine.state.selected === legal[0].from
+      && engine.state.legalMoves.length > 0);
+  engine.state.live = true;
+  engine.state.selected = null;
+  engine.state.legalMoves = [];
+
   engine.state.flipped = true;
   engine.renderPieces();
   const flippedPieces = flatten(pieces).filter((node) => node.dataset && node.dataset.square);
@@ -180,14 +271,26 @@ console.log("== render integration ==");
 
 console.log("== persistence and multiplayer policy ==");
 {
+  const legacyEngine = loadEngine(
+    path.join(here, "www", "app.js"),
+    path.join(here, "ai-data.js"),
+    {
+      beforeEngine(sandbox, win) {
+        win.localStorage.setItem("xiangqi.recommendation.enabled", "0");
+      }
+    }
+  );
+  check("legacy recommendation preference migrates to practice mode",
+    legacyEngine.state.recommendationEnabled === false);
+
   engine.state.recommendationEnabled = true;
   engine.state.busy = true;
   engine.toggleRecommendation();
   check("toggle writes disabled preference",
-    engine.__window.localStorage.getItem("xiangqi.recommendation.enabled") === "0");
+    engine.__window.localStorage.getItem("xiangqi.practice.enabled") === "0");
   engine.toggleRecommendation();
   check("toggle writes enabled preference",
-    engine.__window.localStorage.getItem("xiangqi.recommendation.enabled") === "1");
+    engine.__window.localStorage.getItem("xiangqi.practice.enabled") === "1");
 
   engine.state.net.active = true;
   check("multiplayer hides recommendations", engine.recommendationVisible() === false);
