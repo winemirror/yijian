@@ -71,6 +71,9 @@ console.log("== markup and controls ==");
     html.includes('class="topbar-more"')
     && html.includes('id="redColor"')
     && html.includes('id="autoSpeed"'));
+  check("all toolbar actions use icon and label spans",
+    (html.match(/class="button-icon"/g) || []).length === 8
+    && (html.match(/class="button-label"/g) || []).length === 8);
   check("recommendation legend exists", html.includes('id="recommendationLegend"'));
   check("legend has five tiers",
     (html.match(/recommendation-swatch/g) || []).length === 5);
@@ -85,6 +88,11 @@ console.log("== markup and controls ==");
     /\.move-hints\s*\{[^}]*z-index:\s*4/.test(css));
   check("topbar is compact",
     /\.topbar\s*\{[^}]*min-height:\s*54px/.test(css));
+  check("toolbar buttons share one size and type scale",
+    /\.topbar \.btn,[\s\S]*?height:\s*32px;[\s\S]*?font-size:\s*12px;/.test(css)
+    && /\.topbar \.button-label\s*\{[^}]*font-size:\s*12px/.test(css));
+  check("desktop piece glyphs keep the original 29px size",
+    /\.piece\s*\{[^}]*font-size:\s*29px/.test(css));
   check("board width responds to viewport height",
     /\.board\s*\{[^}]*calc\(\(100vh - 154px\) \* \.9\)/.test(css));
 }
