@@ -115,7 +115,7 @@ async function exerciseViewport(browser, name, viewport) {
         && entry.fontFamily === firstAction.fontFamily
       )),
       JSON.stringify(state.actionMetrics));
-    check(`${name}: piece glyphs remain 29px`, state.pieceFontSize === "29px",
+    check(`${name}: piece glyphs use the compact 25px size`, state.pieceFontSize === "25px",
       state.pieceFontSize);
   }
 
