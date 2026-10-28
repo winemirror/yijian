@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.20.0-20261028";
+  const APP_ASSET_VERSION = "3.20.1-20261029";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2686,6 +2686,18 @@
     recordClearText: document.getElementById("recordClearText"),
     recordStatus: document.getElementById("recordStatus"),
     recordList: document.getElementById("recordList"),
+    onlineLibraryMeta: document.getElementById("onlineLibraryMeta"),
+    onlineGameSearchForm: document.getElementById("onlineGameSearchForm"),
+    onlineGameQuery: document.getElementById("onlineGameQuery"),
+    onlineGameRed: document.getElementById("onlineGameRed"),
+    onlineGameBlack: document.getElementById("onlineGameBlack"),
+    onlineGameEvent: document.getElementById("onlineGameEvent"),
+    onlineGameYear: document.getElementById("onlineGameYear"),
+    onlineGameStatus: document.getElementById("onlineGameStatus"),
+    onlineGameList: document.getElementById("onlineGameList"),
+    onlineGamePrev: document.getElementById("onlineGamePrev"),
+    onlineGameNext: document.getElementById("onlineGameNext"),
+    onlineGamePage: document.getElementById("onlineGamePage"),
     chatLog: document.getElementById("chatLog"),
     chatForm: document.getElementById("chatForm"),
     chatInput: document.getElementById("chatInput"),
@@ -2738,6 +2750,14 @@
     displayAnalysis: null,
     recommendationEnabled: true,
     practiceLevel: "standard",
+    onlineLibrary: {
+      page: 1,
+      pages: 1,
+      total: 0,
+      loading: false,
+      loaded: false,
+      manifest: null
+    },
     recommendation: {
       status: "idle",
       key: "",
@@ -2758,6 +2778,7 @@
     initialBoard: cloneBoard(INITIAL_POSITION),
     initialSide: RED,
     gameId: "",
+    sourceGameCode: "",
     finishedRecordQueued: false,
     startedAt: 0,
     turnStartedAt: 0,
@@ -4801,6 +4822,7 @@
     state.initialBoard = cloneBoard(INITIAL_POSITION);
     state.initialSide = RED;
     state.gameId = newRecordId();
+    state.sourceGameCode = "";
     state.finishedRecordQueued = false;
     state.startedAt = Date.now();
     state.turnStartedAt = state.startedAt;
@@ -5009,6 +5031,9 @@
     document.querySelectorAll(".panel").forEach((panel) => {
       panel.classList.toggle("active", panel.id === panelId);
     });
+    if (name === "records" && !state.onlineLibrary.manifest) {
+      refreshOnlineLibraryMeta();
+    }
   }
 
   document.querySelectorAll(".tab").forEach((tab) => {
@@ -5131,6 +5156,39 @@
     elements.recordClearText.addEventListener("click", () => {
       elements.recordImportText.value = "";
       setRecordStatus("", "");
+    });
+  }
+  if (elements.onlineGameSearchForm) {
+    elements.onlineGameSearchForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      searchOnlineGames(1);
+    });
+  }
+  if (elements.onlineGamePrev) {
+    elements.onlineGamePrev.addEventListener("click", () => {
+      searchOnlineGames(Math.max(1, state.onlineLibrary.page - 1));
+    });
+  }
+  if (elements.onlineGameNext) {
+    elements.onlineGameNext.addEventListener("click", () => {
+      searchOnlineGames(Math.min(state.onlineLibrary.pages, state.onlineLibrary.page + 1));
+    });
+  }
+  [elements.onlineGameRed, elements.onlineGameBlack, elements.onlineGameEvent, elements.onlineGameYear]
+    .filter(Boolean)
+    .forEach((input) => {
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          searchOnlineGames(1);
+        }
+      });
+    });
+  if (elements.onlineGameList) {
+    elements.onlineGameList.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-online-game-action]");
+      if (!button) return;
+      openOnlineGame(button.dataset.onlineGameCode, button.dataset.onlineGameAction);
     });
   }
   if (elements.recordList) {
@@ -5604,7 +5662,8 @@
       })),
       meta: {
         app: APP_ASSET_VERSION,
-        engine: Pikafish ? "yijian+pikafish" : "yijian"
+        engine: Pikafish ? "yijian+pikafish" : "yijian",
+        importedFrom: state.sourceGameCode ? `online:${state.sourceGameCode}` : ""
       }
     });
     state.gameId = record.id;
@@ -5738,6 +5797,302 @@
     if (!elements.recordStatus) return;
     elements.recordStatus.textContent = text || "";
     elements.recordStatus.className = "record-status" + (tone ? " " + tone : "");
+  }
+
+  const ONLINE_GAME_API_KEY = "xiangqi.gameLibraryApi";
+
+  function normalizeOnlineGameCode(value) {
+    const compact = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const match = /^([A-Z]{2})(\d{1,5})$/.exec(compact);
+    return match ? match[1] + match[2].padStart(5, "0") : "";
+  }
+
+  function onlineGameApiBase() {
+    let saved = "";
+    try {
+      saved = window.localStorage.getItem(ONLINE_GAME_API_KEY) || "";
+    } catch (error) {
+      // Local storage is optional.
+    }
+    const queryApi = new URLSearchParams(window.location.search).get("gameApi");
+    const value = String(queryApi || saved
+      || (window.location.hostname === "c.syjnb.top"
+        ? "/api/games"
+        : "https://c.syjnb.top/api/games")).trim();
+    return value.replace(/\/+$/, "");
+  }
+
+  function onlineGameApiUrl(pathname, params) {
+    const base = onlineGameApiBase();
+    const url = new URL(base + pathname, window.location.href);
+    if (params) {
+      Object.keys(params).forEach((key) => {
+        const value = params[key];
+        if (value !== undefined && value !== null && String(value).trim() !== "") {
+          url.searchParams.set(key, String(value).trim());
+        }
+      });
+    }
+    return url.toString();
+  }
+
+  function setOnlineGameStatus(text, tone) {
+    if (!elements.onlineGameStatus) return;
+    elements.onlineGameStatus.textContent = text || "";
+    elements.onlineGameStatus.className = "record-status" + (tone ? " " + tone : "");
+  }
+
+  async function fetchOnlineGameJson(pathname, params) {
+    if (typeof fetch !== "function") throw new Error("当前环境不支持在线棋库");
+    const controller = typeof AbortController === "function"
+      ? new AbortController() : null;
+    const timer = controller
+      ? window.setTimeout(() => controller.abort(), 9000)
+      : 0;
+    try {
+      const response = await fetch(onlineGameApiUrl(pathname, params), {
+        signal: controller ? controller.signal : undefined,
+        headers: { Accept: "application/json" }
+      });
+      let body = null;
+      try {
+        body = await response.json();
+      } catch (error) {
+        body = null;
+      }
+      if (!response.ok) {
+        throw new Error(
+          body && (body.message || body.error)
+            ? (body.message || body.error)
+            : `HTTP ${response.status}`
+        );
+      }
+      return body;
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
+  }
+
+  function createOnlineGameCard(game) {
+    const card = document.createElement("article");
+    card.className = "online-game-card";
+
+    const head = document.createElement("div");
+    head.className = "online-game-card-head";
+    const code = document.createElement("strong");
+    code.className = "online-game-code";
+    code.textContent = game.code;
+    const result = document.createElement("span");
+    result.className = "online-game-result";
+    result.textContent = !game.result || game.result === "*" ? "结果未知" : game.result;
+    head.append(code, result);
+
+    const players = document.createElement("div");
+    players.className = "online-game-players";
+    const names = document.createElement("strong");
+    names.textContent = `${game.red || "红方"} 对 ${game.black || "黑方"}`;
+    const moveCount = document.createElement("span");
+    moveCount.textContent = `${game.moveCount || 0} 手`;
+    players.append(names, moveCount);
+
+    const meta = document.createElement("div");
+    meta.className = "online-game-meta";
+    meta.textContent = [
+      game.event || "未知赛事",
+      game.year || "年份未知"
+    ].join(" · ");
+
+    const actions = document.createElement("div");
+    actions.className = "online-game-actions";
+    [
+      { action: "replay", label: "复盘", primary: true },
+      { action: "continue", label: "从此局续下", primary: false }
+    ].forEach((entry) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn small" + (entry.primary ? " primary" : "");
+      button.textContent = entry.label;
+      button.dataset.onlineGameAction = entry.action;
+      button.dataset.onlineGameCode = game.code;
+      actions.appendChild(button);
+    });
+
+    card.append(head, players, meta, actions);
+    return card;
+  }
+
+  function renderOnlineGameList(result) {
+    const games = result && Array.isArray(result.games) ? result.games : [];
+    state.onlineLibrary.page = Number(result && result.page) || 1;
+    state.onlineLibrary.pages = Number(result && result.pages) || 1;
+    state.onlineLibrary.total = Number(result && result.total) || 0;
+    state.onlineLibrary.loaded = true;
+    if (elements.onlineGamePage) {
+      elements.onlineGamePage.textContent =
+        `第 ${state.onlineLibrary.page} / ${state.onlineLibrary.pages} 页 · ${state.onlineLibrary.total} 盘`;
+    }
+    if (elements.onlineGamePrev) {
+      elements.onlineGamePrev.disabled = state.onlineLibrary.page <= 1;
+    }
+    if (elements.onlineGameNext) {
+      elements.onlineGameNext.disabled =
+        state.onlineLibrary.page >= state.onlineLibrary.pages;
+    }
+    if (!elements.onlineGameList) return;
+    if (!games.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "没有找到匹配的棋谱。";
+      setChildren(elements.onlineGameList, [empty]);
+      return;
+    }
+    setChildren(elements.onlineGameList, games.map(createOnlineGameCard));
+  }
+
+  async function searchOnlineGames(page = 1) {
+    if (state.onlineLibrary.loading) return;
+    state.onlineLibrary.loading = true;
+    setOnlineGameStatus("正在检索在线棋库…");
+    const query = elements.onlineGameQuery ? elements.onlineGameQuery.value : "";
+    const directCode = normalizeOnlineGameCode(query);
+    if (directCode && elements.onlineGameQuery) {
+      elements.onlineGameQuery.value = directCode;
+    }
+    try {
+      const result = await fetchOnlineGameJson("/search", {
+        q: directCode || query,
+        red: elements.onlineGameRed ? elements.onlineGameRed.value : "",
+        black: elements.onlineGameBlack ? elements.onlineGameBlack.value : "",
+        event: elements.onlineGameEvent ? elements.onlineGameEvent.value : "",
+        year: elements.onlineGameYear ? elements.onlineGameYear.value : "",
+        page,
+        limit: 20
+      });
+      renderOnlineGameList(result);
+      setOnlineGameStatus(
+        `在线棋库共 ${result.total} 盘匹配，第 ${result.page} / ${result.pages} 页。`,
+        "success"
+      );
+    } catch (error) {
+      setOnlineGameStatus(
+        "在线棋库连接失败：" + defaultTo(error && error.message, "unknown"),
+        "error"
+      );
+    } finally {
+      state.onlineLibrary.loading = false;
+    }
+  }
+
+  async function refreshOnlineLibraryMeta() {
+    try {
+      const result = await fetchOnlineGameJson("/manifest");
+      const manifest = result && result.manifest ? result.manifest : {};
+      state.onlineLibrary.manifest = manifest;
+      if (elements.onlineLibraryMeta) {
+        elements.onlineLibraryMeta.textContent =
+          `Wukong · ${Number(manifest.accepted || 0).toLocaleString()} 盘`;
+      }
+    } catch (error) {
+      if (elements.onlineLibraryMeta) {
+        elements.onlineLibraryMeta.textContent = "Wukong · 连接失败";
+      }
+    }
+  }
+
+  function onlineGameRecord(game) {
+    if (!Records) throw new Error("棋谱格式模块未加载");
+    if (!game || !game.code || !game.moves) throw new Error("在线棋谱数据不完整");
+    const tokens = String(game.moves).trim().split(/\s+/).filter(Boolean);
+    return Records.normalize({
+      format: Records.FORMAT,
+      version: Records.VERSION,
+      id: game.code,
+      createdAt: new Date().toISOString(),
+      endedAt: null,
+      mode: "replay",
+      rules: {
+        initialFen: game.initialFen || Records.INITIAL_FEN
+      },
+      players: {
+        red: { kind: "human", name: game.red || "红方" },
+        black: { kind: "human", name: game.black || "黑方" }
+      },
+      result: {
+        type: "ongoing",
+        winner: null,
+        reason: game.result === "*" ? "结果未知" : defaultTo(game.result, "在线棋谱")
+      },
+      moves: tokens.map((iccs, index) => ({
+        iccs,
+        side: index % 2 === 0 ? RED : BLACK,
+        notation: "",
+        ms: 0
+      })),
+      meta: {
+        app: "online-game-library",
+        importedFrom: `${game.code} · ${game.event || "Wukong Xiangqi"}`
+      }
+    });
+  }
+
+  function continueOnlineGame(game) {
+    const record = onlineGameRecord(game);
+    const continuedGame = gameFromRecord(record);
+    discardRecordReplay();
+    state.session += 1;
+    aiDriverToken += 1;
+    state.game = continuedGame;
+    state.game.result = { type: "ongoing", winner: null, reason: "" };
+    state.selected = null;
+    state.legalMoves = [];
+    state.live = true;
+    state.reviewPly = state.game.history.length;
+    state.displayAnalysis = null;
+    state.busy = false;
+    state.playing = false;
+    state.initialFen = record.rules.initialFen;
+    const initial = parseXiangqiFen(record.rules.initialFen);
+    state.initialBoard = cloneBoard(initial.board);
+    state.initialSide = initial.side;
+    state.gameId = newRecordId();
+    state.sourceGameCode = game.code;
+    state.finishedRecordQueued = false;
+    state.startedAt = Date.now();
+    state.turnStartedAt = state.startedAt;
+    state.endedAt = 0;
+    state.control[RED] = "human";
+    state.control[BLACK] = "human";
+    renderThinking();
+    activatePanel("analysis");
+    render();
+    setStatus(`已从 ${game.code} 的最终局面续下`);
+  }
+
+  async function openOnlineGame(code, action) {
+    const normalized = normalizeOnlineGameCode(code);
+    if (!normalized) {
+      setOnlineGameStatus("棋谱号格式应为两位字母加最多五位数字。", "error");
+      return;
+    }
+    setOnlineGameStatus(`正在读取 ${normalized}…`);
+    try {
+      const result = await fetchOnlineGameJson(`/${encodeURIComponent(normalized)}`);
+      const game = result && result.game ? result.game : null;
+      if (!game) throw new Error("棋谱不存在");
+      if (action === "continue") {
+        continueOnlineGame(game);
+        setOnlineGameStatus(`已载入 ${normalized}，可直接续下。`, "success");
+      } else {
+        const record = onlineGameRecord(game);
+        if (!openRecordReplay(record)) throw new Error("棋谱复盘载入失败");
+        setOnlineGameStatus(`已进入 ${normalized} 复盘。`, "success");
+      }
+    } catch (error) {
+      setOnlineGameStatus(
+        `读取 ${normalized} 失败：` + defaultTo(error && error.message, "unknown"),
+        "error"
+      );
+    }
   }
 
   function formatRecordDate(value) {
@@ -7389,6 +7744,11 @@
     exitRecordReplay,
     importRecordText,
     saveCurrentRecord,
+    normalizeOnlineGameCode,
+    onlineGameRecord,
+    searchOnlineGames,
+    openOnlineGame,
+    continueOnlineGame,
     spawnMoveTrail,
     formatClock,
     updateClocks,
@@ -7616,6 +7976,13 @@
   resetGame();
   refreshRecordLibrary();
   netInit();
+  const requestedGameCode = normalizeOnlineGameCode(
+    new URLSearchParams(window.location.search).get("game")
+  );
+  if (requestedGameCode) {
+    activatePanel("records");
+    openOnlineGame(requestedGameCode, "replay");
+  }
   // Keep the clocks live. `setInterval` is optional so a headless harness that
   // only stubs setTimeout can still load this file.
   if (typeof window.setInterval === "function") {

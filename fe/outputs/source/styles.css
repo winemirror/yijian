@@ -1739,6 +1739,138 @@ select:focus {
   color: #2f6f4d;
 }
 
+.online-library-block {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.online-game-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  grid-gap: 6px;
+  margin-top: 9px;
+}
+
+.online-game-search input,
+.online-filter-grid input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+}
+
+.online-game-filters {
+  margin-top: 7px;
+}
+
+.online-game-filters summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.online-filter-grid {
+  margin-top: 7px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  grid-gap: 7px;
+}
+
+.online-filter-grid .field {
+  gap: 2px;
+  grid-gap: 2px;
+}
+
+.online-filter-grid .field span {
+  font-size: 10px;
+}
+
+.online-game-list {
+  max-height: 300px;
+  margin-top: 8px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+
+.online-game-card {
+  padding: 9px 2px;
+  border-bottom: 1px solid #e8e4dc;
+}
+
+.online-game-card-head,
+.online-game-players {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.online-game-code {
+  color: #365f4b;
+  font-family: "DIN Alternate", "Bahnschrift", monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+
+.online-game-result {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.online-game-players {
+  margin-top: 5px;
+  gap: 8px;
+  grid-gap: 8px;
+}
+
+.online-game-players strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-game-players span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.online-game-meta {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-game-actions {
+  margin-top: 7px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  grid-gap: 6px;
+}
+
+.online-game-actions .btn {
+  min-width: 0;
+}
+
+.online-game-pagination {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.online-game-pagination span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .record-library-block {
   padding-bottom: 10px;
 }
