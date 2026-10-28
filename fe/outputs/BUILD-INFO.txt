@@ -1,54 +1,51 @@
-弈鉴 · 3.20 构建信息（2026-10-28）
+弈鉴 · 3.21 构建信息（2026-10-29）
 
 包名: com.yijian.xiangqi
-版本: 3.20 (versionCode 49)
+版本: 3.21 (versionCode 50)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.20.apk
-文件大小: 4488669 bytes
-SHA-256: BA7E2CC271E74174A2D9BAF92F8E8C9109C4A154D1D00AAE5CF27E23F699110A
+APK 文件: Yijian-Xiangqi-3.21.apk
+文件大小: 4412674 bytes
+SHA-256: F7154602BB1CD575D0E503EC413BCB75DFB8C8458FC2E7676B363BEF3355D3F0
 
-桌面版: YiJian-Xiangqi-Portable-3.20.exe
+桌面版: YiJian-Xiangqi-Portable-3.21.exe
 别名: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 623616 bytes
-SHA-256: 023BCCCFA7A495B89310A8D3092C221A11BB25D1DE2DBB866F83498BD08E48E8
+文件大小: 641536 bytes
+SHA-256: 61DA17401E07A0A4F61BE436348303E909B2034C18FFF5BA3750887537137FF7
 
-上一版: Yijian-Xiangqi-3.19.apk
+上一版: Yijian-Xiangqi-3.20.apk
 分支: main
-资源版本: 3.20.0-20261028
+资源版本: 3.21.0-20261029
 
 本次改动:
-  - 新增练习模式：当前行棋方棋子显示五级推荐色环，选中棋子后显示全部合法落点的
-    颜色分级和该棋子范围内的 1..N 排名。
-  - 练习颜色按不同分数的候选分组形成排名梯度；同分同色，排名下降时颜色只会
-    向较差方向移动，明显败着仍保留绝对风险下限。
-  - 练习强度提供标准、深入两档，并对完整本地排名和皮卡鱼首选分别展示。
-  - 皮卡鱼对局中以金色菱形标记皮卡鱼首选，不替换本地完整合法着法排名。
-  - 复盘局面可在练习模式中选子查看落点，但不会实际落子；联机与观战禁用练习模式。
-  - 顶部工具栏压缩并重排：棋子颜色、AI 速度和练习强度收进设置菜单。
-  - 执子下拉框与全部操作按钮统一高度和垂直位置，按钮统一为图标加文字。
-  - 桌面棋子字形恢复并固定为 29px；棋盘尺寸结合窗口高度自适应，常见桌面分辨率可
-    在首屏完整看到棋盘。
+  - 新增 Wukong 在线大师棋库：40,249 盘 ICCS 棋谱可检索、复盘和续下。
+  - 棋谱号采用两位字母加五位数字，支持 wk223 自动补全为 WK00223。
+  - 支持棋手中文名/拼音、赛事、年份、红黑方和棋谱号检索。
+  - 支持 ?game=WK00223 深链接直接打开复盘。
+  - 从在线棋谱续下时保留完整历史，用于后续重复局面和终局判断。
+  - 服务端新增 /api/games 检索与单局读取 API，棋库独立于联机信令数据。
+  - 练习模式候选颜色改为按分数分组形成排名梯度，同分同色且顺序单调。
+  - 同步发布博客更新说明《弈鉴 3.21：在线 Wukong 棋库》。
 
-计划发布入口（尚未部署）:
+线上入口:
   - https://syjnb.top/yijian/
-  - https://syjnb.top/downloads/Yijian-Xiangqi-3.20.apk
-  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.20.exe
+  - https://syjnb.top/downloads/Yijian-Xiangqi-3.21.apk
+  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.21.exe
+  - https://c.syjnb.top/api/games/health
+  - https://syjnb.top/post/yijian-3-21/
 
 验证:
-  - verify-recommendations：完整着法覆盖、五级分类、标准/深入档、皮卡鱼首选、
-    复盘选子、本地设置迁移和联机禁用全部通过。
-  - verify-recommendations-browser：1280x900、1366x768、390x844 三档通过；
-    顶部按钮与执子框同高对齐，桌面棋子字号 29px，棋盘进入首屏。
-  - 浏览器联机检查通过：进入房间后练习标记隐藏、练习强度锁定、双方座位锁定为玩家；
-    退出房间后练习控制和座位选择恢复。
-  - verify-pikafish、verify-records、verify-motion、verify-styles、verify-quality、
-    verify-mate、verify-compat、verify-net 全部通过；联机双端握手、走子同步、观战、
-    悔棋、密码房、断线重连和 TURN/STUN 自检通过。
+  - verify-online-games-browser：公网检索、自动补全、复盘、续下、深链接、
+    桌面和手机布局全部通过。
+  - game-library API：40,249 盘、中文姓名别名、赛事/年份筛选、单局读取、
+    404/400 边界和 CORS 全部通过。
+  - verify-recommendations、verify-records、verify-pikafish、verify-motion、
+    verify-styles、verify-quality、verify-mate、verify-compat、verify-net、
+    verify-server 全部通过。
   - EXE 内嵌 9 个前端资源逐一与源码 SHA-256 比对一致。
   - APK 内嵌 9 个前端资源逐一与源码 SHA-256 比对一致。
-  - APK versionName=3.20、versionCode=49，包名 com.yijian.xiangqi，签名与 1.5 一致。
+  - APK versionName=3.21、versionCode=50，包名 com.yijian.xiangqi，签名与 1.5 一致。
 
 说明: 皮卡鱼常驻服务继续运行在 ss，本轮不改变服务端房间和计算参数。
