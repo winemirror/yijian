@@ -156,6 +156,7 @@
         <button id="playToggle" class="btn play-toggle" type="button" aria-label="播放" title="播放 / 暂停 AI 走子">&#9654;</button>
         <button id="soundToggle" class="btn sound-toggle" type="button" aria-label="关闭音效" title="音效：开">&#128266;</button>
         <button id="autoStep" class="btn" type="button" title="让系统替你走一步当前最优着法">自动下一步</button>
+        <button id="recommendationToggle" class="btn recommendation-toggle active" type="button" aria-pressed="true" title="关闭推荐标记"><span aria-hidden="true">◎</span> 推荐</button>
         <button id="newGame" class="btn primary" type="button">新对局</button>
         <button id="undoMove" class="btn" type="button">悔棋</button>
         <button id="flipBoard" class="btn" type="button" title="翻转棋盘（黑方在下）">翻转</button>
@@ -246,6 +247,14 @@
             <div id="moveCounter" class="move-counter">第 1 回合</div>
           </div>
           <div id="moveTicker" class="move-ticker" aria-label="走法播报"></div>
+          <div id="recommendationLegend" class="recommendation-legend" aria-label="AI 推荐颜色图例" hidden>
+            <span id="recommendationLegendStatus" class="recommendation-status">完整分析中</span>
+            <span class="recommendation-legend-item"><i class="recommendation-swatch best"></i>最优</span>
+            <span class="recommendation-legend-item"><i class="recommendation-swatch good"></i>好</span>
+            <span class="recommendation-legend-item"><i class="recommendation-swatch playable"></i>可下</span>
+            <span class="recommendation-legend-item"><i class="recommendation-swatch poor"></i>偏差</span>
+            <span class="recommendation-legend-item"><i class="recommendation-swatch worst"></i>最差</span>
+          </div>
         </div>
       </section>
 

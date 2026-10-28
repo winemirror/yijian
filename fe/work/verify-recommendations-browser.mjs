@@ -1,0 +1,186 @@
+import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const { chromium } = require("playwright");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const url = process.env.YIJIAN_URL || "http://127.0.0.1:4391/index.html";
+const artifactDir = process.env.ARTIFACT_DIR || os.tmpdir();
+const edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+
+const problems = [];
+const browserErrors = [];
+const check = (label, ok, detail = "") => {
+  console.log(`  ${ok ? "PASS" : "FAIL"} ${label}${detail ? ` - ${detail}` : ""}`);
+  if (!ok) problems.push(label);
+};
+
+async function waitForRecommendation(page) {
+  await page.waitForFunction(() => (
+    window.XiangqiLocal
+    && window.XiangqiLocal.state.recommendation.status === "ready"
+    && document.querySelectorAll(".piece[data-recommend-tier]").length > 0
+  ), null, { timeout: 20000 });
+}
+
+async function exerciseViewport(browser, name, viewport) {
+  const context = await browser.newContext({
+    viewport,
+    deviceScaleFactor: 1,
+    reducedMotion: "no-preference"
+  });
+  const page = await context.newPage();
+  page.on("pageerror", (error) => browserErrors.push(`${name}: ${error.message}`));
+  page.on("console", (message) => {
+    if (
+      message.type() === "error"
+      && !message.text().includes("Failed to load resource")
+    ) {
+      browserErrors.push(`${name}: ${message.text()}`);
+    }
+  });
+  await page.goto(url, { waitUntil: "networkidle" });
+  await waitForRecommendation(page);
+
+  const state = await page.evaluate(() => ({
+    status: window.XiangqiLocal.state.recommendation.status,
+    moves: window.XiangqiLocal.state.recommendation.legalCount,
+    depth: window.XiangqiLocal.state.recommendation.depth,
+    markedPieces: document.querySelectorAll(".piece[data-recommend-tier]").length,
+    topPieces: document.querySelectorAll('.piece[data-recommend-top="1"]').length,
+    legendHidden: document.getElementById("recommendationLegend").hidden
+  }));
+  check(`${name}: initial ranking is ready`, state.status === "ready", state.status);
+  check(`${name}: all initial legal moves are covered`, state.moves === 44, String(state.moves));
+  check(`${name}: analysis has depth`, state.depth >= 1, String(state.depth));
+  check(`${name}: current-side pieces have rings`, state.markedPieces >= 10, String(state.markedPieces));
+  check(`${name}: one best piece has a badge`, state.topPieces === 1, String(state.topPieces));
+  check(`${name}: legend is visible`, state.legendHidden === false);
+
+  const targetSelection = await page.evaluate(() => {
+    const state = window.XiangqiLocal.state;
+    const moves = window.XiangqiLocal.generateLegalMoves(
+      state.game.board,
+      state.game.sideToMove
+    );
+    const counts = new Map();
+    for (const move of moves) {
+      counts.set(move.from, (counts.get(move.from) || 0) + 1);
+    }
+    const square = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
+    document.querySelector(`.piece[data-square="${square}"]`).click();
+    return { square, count: counts.get(square) };
+  });
+  await page.waitForFunction(
+    (square) => window.XiangqiLocal.state.selected === square,
+    targetSelection.square
+  );
+  await page.waitForTimeout(250);
+  const targetDebug = await page.evaluate(() => ({
+    selected: window.XiangqiLocal.state.selected,
+    legalMoves: window.XiangqiLocal.state.legalMoves.map((move) => ({
+      from: move.from,
+      to: move.to,
+      code: move.from * 90 + move.to
+    })),
+    recommendationStatus: window.XiangqiLocal.state.recommendation.status,
+    recommendationSide: window.XiangqiLocal.state.recommendation.side,
+    recommendationKeys: Object.keys(window.XiangqiLocal.state.recommendation.moveByCode || {}),
+    rankedHints: document.querySelectorAll(".hint[data-recommend-rank]").length,
+    allHints: document.querySelectorAll(".hint").length
+  }));
+  const targetSummary = `selected=${targetDebug.selected} legal=${targetDebug.legalMoves.length} hints=${targetDebug.rankedHints}`;
+  check(`${name}: selected piece exposes legal targets`,
+    targetDebug.legalMoves.length === targetSelection.count
+      && targetDebug.legalMoves.length >= 2,
+    targetSummary);
+  check(`${name}: recommendation contains those target moves`,
+    targetDebug.legalMoves.every((move) => (
+      targetDebug.recommendationKeys.includes(String(move.code))
+    )), targetSummary);
+  check(`${name}: selected targets are rendered`,
+    targetDebug.rankedHints >= 2, targetSummary);
+  const selected = await page.evaluate(() => {
+    const hints = [...document.querySelectorAll(".hint[data-recommend-rank]")];
+    const ranks = hints.map((node) => Number(node.dataset.recommendRank)).sort((a, b) => a - b);
+    return {
+      count: hints.length,
+      colors: hints.map((node) => getComputedStyle(node).borderTopColor),
+      ranks,
+      selected: window.XiangqiLocal.state.selected,
+      overflow: document.documentElement.scrollWidth - window.innerWidth
+    };
+  });
+  check(`${name}: selected piece shows its legal targets`,
+    selected.count === targetSelection.count, String(selected.count));
+  check(`${name}: selected target ranks are local and contiguous`,
+    selected.ranks.every((rank, index) => rank === index + 1),
+    selected.ranks.join(","));
+  check(`${name}: target ranks use more than one colour`,
+    new Set(selected.colors).size >= 2, selected.colors.join(" | "));
+  check(`${name}: no horizontal page overflow`, selected.overflow <= 1, String(selected.overflow));
+  check(`${name}: selected piece remains active`,
+    selected.selected === targetSelection.square, String(selected.selected));
+
+  const screenshot = path.join(artifactDir, `yijian-recommendations-${name}.png`);
+  await page.screenshot({ path: screenshot, fullPage: true });
+  console.log(`  screenshot: ${screenshot}`);
+
+  await page.locator("#flipBoard").click();
+  const flipped = await page.evaluate(() => ({
+    flipped: window.XiangqiLocal.state.flipped,
+    marked: document.querySelectorAll(".piece[data-recommend-tier]").length
+  }));
+  check(`${name}: recommendation survives board flip`,
+    flipped.flipped === true && flipped.marked >= 10, JSON.stringify(flipped));
+
+  await page.locator("#recommendationToggle").click();
+  const disabled = await page.evaluate(() => ({
+    enabled: window.XiangqiLocal.state.recommendationEnabled,
+    stored: localStorage.getItem("xiangqi.recommendation.enabled"),
+    marked: document.querySelectorAll(".piece[data-recommend-tier]").length
+  }));
+  check(`${name}: toggle clears recommendation rings`, disabled.marked === 0, String(disabled.marked));
+  check(`${name}: toggle persists off`, disabled.enabled === false && disabled.stored === "0");
+
+  await page.reload({ waitUntil: "networkidle" });
+  const reloaded = await page.evaluate(() => ({
+    enabled: window.XiangqiLocal.state.recommendationEnabled,
+    marked: document.querySelectorAll(".piece[data-recommend-tier]").length,
+    legendHidden: document.getElementById("recommendationLegend").hidden
+  }));
+  check(`${name}: disabled preference survives reload`,
+    reloaded.enabled === false
+      && reloaded.marked === 0
+      && reloaded.legendHidden === true,
+    JSON.stringify(reloaded));
+
+  await context.close();
+}
+
+const browser = await chromium.launch({
+  executablePath: edge,
+  headless: true,
+  args: ["--disable-gpu"]
+});
+try {
+  await exerciseViewport(browser, "desktop", { width: 1280, height: 900 });
+  await exerciseViewport(browser, "mobile", { width: 390, height: 844 });
+} finally {
+  await browser.close();
+}
+
+check("browser reports no page or console errors",
+  browserErrors.length === 0, browserErrors.join(" | "));
+
+console.log("");
+if (problems.length === 0) {
+  console.log("RECOMMENDATION BROWSER CHECKS PASSED");
+  process.exitCode = 0;
+} else {
+  console.log(`PROBLEMS: ${problems.join("; ")}`);
+  process.exitCode = 1;
+}

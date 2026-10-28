@@ -18,6 +18,8 @@ export const BLACK = "b";
 function makeElement() {
   const styleProps = {};
   const children = [];
+  const classes = new Set();
+  const attributes = {};
   const el = {
     value: "",
     textContent: "",
@@ -34,7 +36,27 @@ function makeElement() {
       setProperty(name, value) { styleProps[name] = String(value); },
       removeProperty(name) { delete styleProps[name]; },
     },
-    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    classList: {
+      add(...names) { for (const name of names) classes.add(name); },
+      remove(...names) { for (const name of names) classes.delete(name); },
+      toggle(name, force) {
+        if (force === true) {
+          classes.add(name);
+          return true;
+        }
+        if (force === false) {
+          classes.delete(name);
+          return false;
+        }
+        if (classes.has(name)) {
+          classes.delete(name);
+          return false;
+        }
+        classes.add(name);
+        return true;
+      },
+      contains(name) { return classes.has(name); }
+    },
     addEventListener() {},
     removeEventListener() {},
     children,
@@ -44,11 +66,16 @@ function makeElement() {
     querySelector() { return null; },
     querySelectorAll() { return []; },
     getBoundingClientRect() { return { left: 0, top: 0, width: 900, height: 1000 }; },
-    setAttribute() {},
-    removeAttribute() {},
+    setAttribute(name, value) { attributes[name] = String(value); },
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(attributes, name) ? attributes[name] : null;
+    },
+    removeAttribute(name) { delete attributes[name]; },
     remove() {},
     cloneNode() { return makeElement(); },
     closest() { return null; },
+    attributes,
+    classes,
   };
   return el;
 }
