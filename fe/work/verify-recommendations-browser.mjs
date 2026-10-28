@@ -44,18 +44,35 @@ async function exerciseViewport(browser, name, viewport) {
   await page.goto(url, { waitUntil: "networkidle" });
   await waitForRecommendation(page);
 
-  const state = await page.evaluate(() => ({
-    status: window.XiangqiLocal.state.recommendation.status,
-    moves: window.XiangqiLocal.state.recommendation.legalCount,
-    depth: window.XiangqiLocal.state.recommendation.depth,
-    markedPieces: document.querySelectorAll(".piece[data-recommend-tier]").length,
-    topPieces: document.querySelectorAll('.piece[data-recommend-top="1"]').length,
-    legendHidden: document.getElementById("recommendationLegend").hidden,
-    practiceText: document.getElementById("recommendationToggle").textContent.trim(),
-    topbarHeight: document.querySelector(".topbar").getBoundingClientRect().height,
-    boardBottom: document.getElementById("board").getBoundingClientRect().bottom,
-    viewportHeight: window.innerHeight
-  }));
+  const state = await page.evaluate(() => {
+    const actionButtons = [...document.querySelectorAll(".topbar-actions .action-button")];
+    const actionMetrics = actionButtons.map((button) => {
+      const rect = button.getBoundingClientRect();
+      const label = button.querySelector(".button-label");
+      return {
+        text: label ? label.textContent : "",
+        top: rect.top,
+        height: rect.height,
+        fontSize: label ? getComputedStyle(label).fontSize : "",
+        fontFamily: label ? getComputedStyle(label).fontFamily : ""
+      };
+    });
+    const firstPiece = document.querySelector(".piece");
+    return {
+      status: window.XiangqiLocal.state.recommendation.status,
+      moves: window.XiangqiLocal.state.recommendation.legalCount,
+      depth: window.XiangqiLocal.state.recommendation.depth,
+      markedPieces: document.querySelectorAll(".piece[data-recommend-tier]").length,
+      topPieces: document.querySelectorAll('.piece[data-recommend-top="1"]').length,
+      legendHidden: document.getElementById("recommendationLegend").hidden,
+      practiceText: document.getElementById("recommendationToggle").textContent.trim(),
+      topbarHeight: document.querySelector(".topbar").getBoundingClientRect().height,
+      boardBottom: document.getElementById("board").getBoundingClientRect().bottom,
+      viewportHeight: window.innerHeight,
+      pieceFontSize: firstPiece ? getComputedStyle(firstPiece).fontSize : "",
+      actionMetrics
+    };
+  });
   check(`${name}: initial ranking is ready`, state.status === "ready", state.status);
   check(`${name}: all initial legal moves are covered`, state.moves === 44, String(state.moves));
   check(`${name}: analysis has depth`, state.depth >= 1, String(state.depth));
@@ -68,6 +85,20 @@ async function exerciseViewport(browser, name, viewport) {
     check(`${name}: complete board fits in the viewport`,
       state.boardBottom <= state.viewportHeight,
       `${state.boardBottom}/${state.viewportHeight}`);
+    const firstAction = state.actionMetrics[0];
+    check(`${name}: all toolbar buttons align`,
+      state.actionMetrics.length === 8
+        && state.actionMetrics.every((entry) => Math.abs(entry.top - firstAction.top) < 1),
+      JSON.stringify(state.actionMetrics));
+    check(`${name}: all toolbar actions share height and type scale`,
+      state.actionMetrics.every((entry) => (
+        Math.abs(entry.height - 32) < 1
+        && entry.fontSize === "12px"
+        && entry.fontFamily === firstAction.fontFamily
+      )),
+      JSON.stringify(state.actionMetrics));
+    check(`${name}: piece glyphs remain 29px`, state.pieceFontSize === "29px",
+      state.pieceFontSize);
   }
 
   const pikafishMarkers = await page.evaluate(() => {

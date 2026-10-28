@@ -3125,7 +3125,11 @@
 
   function updateSoundButton() {
     if (!elements.soundToggle) return;
-    elements.soundToggle.textContent = state.soundOn ? "\u{1F50A}" : "\u{1F507}";
+    const icon = elements.soundToggle.querySelector(".button-icon");
+    const label = elements.soundToggle.querySelector(".button-label");
+    if (icon) icon.textContent = "\u266B";
+    if (label) label.textContent = "音效";
+    if (!icon) elements.soundToggle.textContent = "\u266B";
     elements.soundToggle.classList.toggle("muted", !state.soundOn);
     elements.soundToggle.setAttribute("aria-label", state.soundOn ? "关闭音效" : "开启音效");
     elements.soundToggle.title = state.soundOn ? "音效：开" : "音效：关";
@@ -3877,7 +3881,10 @@
       elements.gameColumn.classList.toggle("flipped", state.flipped);
     }
     if (elements.flipBoard) {
-      elements.flipBoard.textContent = state.flipped ? "摆正" : "翻转";
+      const icon = elements.flipBoard.querySelector(".button-icon");
+      const label = elements.flipBoard.querySelector(".button-label");
+      if (label) label.textContent = state.flipped ? "摆正" : "翻转";
+      if (!label) elements.flipBoard.textContent = state.flipped ? "摆正" : "翻转";
       elements.flipBoard.title = state.flipped ? "恢复红方在下" : "翻转棋盘（黑方在下）";
       elements.flipBoard.setAttribute("aria-label", elements.flipBoard.title);
     }
@@ -4595,7 +4602,11 @@
     const hasAI = !state.replay.active && !netActive()
       && (state.control[RED] === "ai" || state.control[BLACK] === "ai");
     elements.playToggle.disabled = !hasAI;
-    elements.playToggle.textContent = state.playing ? "\u23F8" : "\u25B6";
+    const icon = elements.playToggle.querySelector(".button-icon");
+    const label = elements.playToggle.querySelector(".button-label");
+    if (icon) icon.textContent = state.playing ? "\u2161" : "\u25B6";
+    if (label) label.textContent = state.playing ? "暂停" : "播放";
+    if (!icon) elements.playToggle.textContent = state.playing ? "\u2161" : "\u25B6";
     elements.playToggle.classList.toggle("playing", state.playing);
     elements.playToggle.setAttribute("aria-label", state.playing ? "暂停" : "播放");
     elements.playToggle.title = state.playing ? "暂停 AI 走子" : "开始 AI 走子";
