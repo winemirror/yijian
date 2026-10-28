@@ -385,7 +385,11 @@ NNUE 引擎的主要差距。
 - 支持棋手拼音、常用中文名、赛事、年份和棋谱号检索；
 - 两位字母加五位数字组成棋谱号，例如 `WK00223`；
 - 输入 `wk223`、`WK-223` 会自动规范为 `WK00223`；
+- 点击 **随机一局** 会从完整棋库等概率抽取一盘并直接打开复盘；
 - 点击 **复盘** 进入只读复盘，点击 **从此局续下** 会从最终局面创建新对局；
+- 在线棋谱复盘可停在任意一手，点 **接管红方** 或 **接管黑方** 后，以该局面
+  创建新对局；接管方由玩家操作，另一方默认交给当前 AI 续下，
+  也可以再用顶部执子选项改对方为玩家。原谱后续着法会被截断。
 - 支持 `?game=WK00223` 直接打开棋谱；
 - 生成数据、来源、许可证和哈希见 `server/data/README.md`。
 
@@ -529,7 +533,7 @@ $env:ROOT = "work\www"; $env:PORT = "4291"; node serve.mjs
 | `node verify-records.mjs` | 棋谱 v2、v1/ICCS 导入、重放重建与非法着法拦截 |
 | `node server/verify-server.mjs` | 信令服务协议（建房/加入/满座/转发/房间列表/限流） |
 | `node verify-records-browser.mjs` | IndexedDB、导入复盘、自动入库与桌面/手机布局（需本机 Chrome） |
-| `node verify-online-games-browser.mjs` | 在线棋库检索、自动补全、复盘、续下、深链接与移动端布局 |
+| `node verify-online-games-browser.mjs` | 在线棋库检索、随机抽取、任意手接管、复盘、续下、深链接与移动端布局 |
 
 `harness.mjs` 是这些套件共用的无头框架：它用极简 DOM 桩在 `vm` 里加载
 **生产用的同一份 `records.js` + `app.js`**（不复制引擎代码），因此可以直接跑

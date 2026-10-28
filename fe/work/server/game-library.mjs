@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const CODE_RE = /^([A-Z]{2})(\d{1,5})$/;
 const PLAYER_ALIASES = new Map([
@@ -205,6 +206,12 @@ export function createGameLibrary(options = {}) {
     });
   }
 
+  function random() {
+    load();
+    if (!catalog.length) return null;
+    return publicEntry(catalog[crypto.randomInt(catalog.length)]);
+  }
+
   function health() {
     try {
       load();
@@ -229,6 +236,7 @@ export function createGameLibrary(options = {}) {
     getManifest,
     search,
     get,
+    random,
     health,
     normalizeCode: normalizeGameCode
   };

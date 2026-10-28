@@ -1681,6 +1681,23 @@ select:focus {
   padding: 0 5px;
 }
 
+.replay-takeover {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  grid-gap: 6px;
+}
+
+.replay-takeover[hidden] {
+  display: none;
+}
+
+.replay-takeover .btn {
+  min-width: 0;
+  font-size: 11px;
+}
+
 .replay-notice + .move-list {
   height: 474px;
 }
@@ -1754,7 +1771,7 @@ select:focus {
 
 .online-game-search {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px;
   grid-gap: 6px;
   margin-top: 9px;

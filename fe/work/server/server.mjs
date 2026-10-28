@@ -503,6 +503,15 @@ function handleGamesApi(request, response, url) {
       sendJson(response, 200, Object.assign({ ok: true }, result));
       return;
     }
+    if (url.pathname === "/api/games/random") {
+      const game = gameLibrary.random();
+      if (!game) {
+        sendJson(response, 404, { ok: false, error: "game_library_empty" });
+        return;
+      }
+      sendJson(response, 200, { ok: true, game });
+      return;
+    }
     const match = /^\/api\/games\/([^/]+)$/.exec(url.pathname);
     if (match) {
       const code = gameLibrary.normalizeCode(decodeURIComponent(match[1]));
