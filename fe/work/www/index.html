@@ -107,59 +107,86 @@
       </div>
 
       <div class="topbar-controls">
-        <label class="field">
-          <span>红方</span>
-          <select id="redSetup">
-            <option value="player">玩家</option>
-            <option value="human" selected>我执子</option>
-            <option value="ai:easy">AI · 入门</option>
-            <option value="ai:medium">AI · 初级</option>
-            <option value="ai:hard">AI · 中级</option>
-            <option value="ai:master">AI · 高级</option>
-            <option value="pikafish:fast">皮卡鱼 · 快速</option>
-            <option value="pikafish:standard">皮卡鱼 · 标准</option>
-            <option value="pikafish:deep">皮卡鱼 · 深度</option>
-            <option value="ai:idiot">AI · 瞎几把下</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>黑方</span>
-          <select id="blackSetup">
-            <option value="player">玩家</option>
-            <option value="human">我执子</option>
-            <option value="ai:easy">AI · 入门</option>
-            <option value="ai:medium" selected>AI · 初级</option>
-            <option value="ai:hard">AI · 中级</option>
-            <option value="ai:master">AI · 高级</option>
-            <option value="pikafish:fast">皮卡鱼 · 快速</option>
-            <option value="pikafish:standard">皮卡鱼 · 标准</option>
-            <option value="pikafish:deep">皮卡鱼 · 深度</option>
-            <option value="ai:idiot">AI · 瞎几把下</option>
-          </select>
-        </label>
-        <label class="field color-field">
-          <span>红方棋子</span>
-          <input id="redColor" type="color" value="#8b0000" aria-label="红方棋子颜色">
-        </label>
-        <label class="field color-field">
-          <span>黑方棋子</span>
-          <input id="blackColor" type="color" value="#1f1d1a" aria-label="黑方棋子颜色">
-        </label>
-        <label class="field">
-          <span>AI 速度</span>
-          <select id="autoSpeed">
-            <option value="fast">快</option>
-            <option value="normal" selected>中</option>
-            <option value="slow">慢</option>
-          </select>
-        </label>
-        <button id="playToggle" class="btn play-toggle" type="button" aria-label="播放" title="播放 / 暂停 AI 走子">&#9654;</button>
-        <button id="soundToggle" class="btn sound-toggle" type="button" aria-label="关闭音效" title="音效：开">&#128266;</button>
-        <button id="autoStep" class="btn" type="button" title="让系统替你走一步当前最优着法">自动下一步</button>
-        <button id="recommendationToggle" class="btn recommendation-toggle active" type="button" aria-pressed="true" title="关闭推荐标记"><span aria-hidden="true">◎</span> 推荐</button>
-        <button id="newGame" class="btn primary" type="button">新对局</button>
-        <button id="undoMove" class="btn" type="button">悔棋</button>
-        <button id="flipBoard" class="btn" type="button" title="翻转棋盘（黑方在下）">翻转</button>
+        <div class="side-controls">
+          <label class="field field-compact">
+            <span>红方</span>
+            <select id="redSetup">
+              <option value="player">玩家</option>
+              <option value="human" selected>我执子</option>
+              <option value="ai:easy">AI · 入门</option>
+              <option value="ai:medium">AI · 初级</option>
+              <option value="ai:hard">AI · 中级</option>
+              <option value="ai:master">AI · 高级</option>
+              <option value="pikafish:fast">皮卡鱼 · 快速</option>
+              <option value="pikafish:standard">皮卡鱼 · 标准</option>
+              <option value="pikafish:deep">皮卡鱼 · 深度</option>
+              <option value="ai:idiot">AI · 瞎几把下</option>
+            </select>
+          </label>
+          <label class="field field-compact">
+            <span>黑方</span>
+            <select id="blackSetup">
+              <option value="player">玩家</option>
+              <option value="human">我执子</option>
+              <option value="ai:easy">AI · 入门</option>
+              <option value="ai:medium" selected>AI · 初级</option>
+              <option value="ai:hard">AI · 中级</option>
+              <option value="ai:master">AI · 高级</option>
+              <option value="pikafish:fast">皮卡鱼 · 快速</option>
+              <option value="pikafish:standard">皮卡鱼 · 标准</option>
+              <option value="pikafish:deep">皮卡鱼 · 深度</option>
+              <option value="ai:idiot">AI · 瞎几把下</option>
+            </select>
+          </label>
+        </div>
+        <div class="topbar-actions">
+          <button id="playToggle" class="btn play-toggle" type="button" aria-label="播放" title="播放 / 暂停 AI 走子">&#9654;</button>
+          <button id="autoStep" class="btn compact-action" type="button" title="让系统替你走一步当前最优着法"><span aria-hidden="true">&#10132;</span><span>自动</span></button>
+          <button id="recommendationToggle" class="btn recommendation-toggle active" type="button" aria-pressed="true" aria-label="练习模式" title="关闭练习模式"><span aria-hidden="true">&#9678;</span><span>练习</span></button>
+          <button id="newGame" class="btn primary compact-action" type="button" aria-label="新对局" title="新对局"><span aria-hidden="true">+</span><span>新局</span></button>
+          <button id="undoMove" class="btn toolbar-icon" type="button" aria-label="悔棋" title="悔棋">&#8630;</button>
+          <button id="flipBoard" class="btn toolbar-icon" type="button" aria-label="翻转棋盘" title="翻转棋盘">&#8645;</button>
+          <button id="soundToggle" class="btn sound-toggle" type="button" aria-label="关闭音效" title="音效：开">&#128266;</button>
+          <details class="topbar-more">
+            <summary class="btn settings-toggle" aria-label="外观与练习设置" title="外观与练习设置">&#9881;</summary>
+            <div class="topbar-menu">
+              <div class="topbar-menu-section">
+                <strong>棋子外观</strong>
+                <div class="topbar-menu-grid">
+                  <label class="field color-field">
+                    <span>红方</span>
+                    <input id="redColor" type="color" value="#8b0000" aria-label="红方棋子颜色">
+                  </label>
+                  <label class="field color-field">
+                    <span>黑方</span>
+                    <input id="blackColor" type="color" value="#1f1d1a" aria-label="黑方棋子颜色">
+                  </label>
+                </div>
+              </div>
+              <div class="topbar-menu-section">
+                <strong>对局节奏</strong>
+                <label class="field">
+                  <span>AI 速度</span>
+                  <select id="autoSpeed">
+                    <option value="fast">快</option>
+                    <option value="normal" selected>中</option>
+                    <option value="slow">慢</option>
+                  </select>
+                </label>
+              </div>
+              <div class="topbar-menu-section">
+                <strong>练习模式</strong>
+                <label class="field">
+                  <span>分析强度</span>
+                  <select id="practiceDepth">
+                    <option value="standard" selected>标准</option>
+                    <option value="deep">深入</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </details>
+        </div>
       </div>
     </header>
 
@@ -254,6 +281,7 @@
             <span class="recommendation-legend-item"><i class="recommendation-swatch playable"></i>可下</span>
             <span class="recommendation-legend-item"><i class="recommendation-swatch poor"></i>偏差</span>
             <span class="recommendation-legend-item"><i class="recommendation-swatch worst"></i>最差</span>
+            <span id="pikafishLegend" class="recommendation-legend-item" hidden><i class="recommendation-diamond"></i>皮卡鱼首选</span>
           </div>
         </div>
       </section>
