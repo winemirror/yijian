@@ -96,8 +96,8 @@ console.log("== markup and controls ==");
   check("toolbar buttons share one size and type scale",
     /\.topbar \.btn,[\s\S]*?height:\s*32px;[\s\S]*?font-size:\s*12px;/.test(css)
     && /\.topbar \.button-label\s*\{[^}]*font-size:\s*12px/.test(css));
-  check("desktop piece glyphs keep the original 29px size",
-    /\.piece\s*\{[^}]*font-size:\s*29px/.test(css));
+  check("desktop piece glyphs use the compact 25px size",
+    /\.piece\s*\{[^}]*font-size:\s*25px/.test(css));
   check("board width responds to viewport height",
     /\.board\s*\{[^}]*calc\(\(100vh - 154px\) \* \.9\)/.test(css));
 }

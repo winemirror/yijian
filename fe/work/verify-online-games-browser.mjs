@@ -63,6 +63,20 @@ try {
     await page.locator("#onlineGameQuery").inputValue() === "WK00223");
   check("online card offers replay and continuation",
     card.buttons.includes("replay") && card.buttons.includes("continue"));
+  const onlineFonts = await page.evaluate(() => ({
+    query: getComputedStyle(document.getElementById("onlineGameQuery")).fontSize,
+    filters: getComputedStyle(document.querySelector(".online-game-filters summary")).fontSize,
+    code: getComputedStyle(document.querySelector(".online-game-code")).fontSize,
+    players: getComputedStyle(document.querySelector(".online-game-players strong")).fontSize,
+    meta: getComputedStyle(document.querySelector(".online-game-meta")).fontSize
+  }));
+  check("online library uses compact type scale",
+    onlineFonts.query === "11px"
+      && onlineFonts.filters === "10px"
+      && onlineFonts.code === "11px"
+      && onlineFonts.players === "11px"
+      && onlineFonts.meta === "9px",
+    JSON.stringify(onlineFonts));
 
   await page.locator('[data-online-game-code="WK00223"][data-online-game-action="replay"]').click();
   await page.waitForFunction(() => (
