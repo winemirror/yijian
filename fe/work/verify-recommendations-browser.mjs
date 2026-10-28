@@ -57,6 +57,10 @@ async function exerciseViewport(browser, name, viewport) {
         fontFamily: label ? getComputedStyle(label).fontFamily : ""
       };
     });
+    const sideSelects = ["redSetup", "blackSetup"].map((id) => {
+      const rect = document.getElementById(id).getBoundingClientRect();
+      return { id, top: rect.top, height: rect.height };
+    });
     const firstPiece = document.querySelector(".piece");
     return {
       status: window.XiangqiLocal.state.recommendation.status,
@@ -70,7 +74,8 @@ async function exerciseViewport(browser, name, viewport) {
       boardBottom: document.getElementById("board").getBoundingClientRect().bottom,
       viewportHeight: window.innerHeight,
       pieceFontSize: firstPiece ? getComputedStyle(firstPiece).fontSize : "",
-      actionMetrics
+      actionMetrics,
+      sideSelects
     };
   });
   check(`${name}: initial ranking is ready`, state.status === "ready", state.status);
@@ -90,6 +95,13 @@ async function exerciseViewport(browser, name, viewport) {
       state.actionMetrics.length === 8
         && state.actionMetrics.every((entry) => Math.abs(entry.top - firstAction.top) < 1),
       JSON.stringify(state.actionMetrics));
+    check(`${name}: side selectors align with toolbar buttons`,
+      state.sideSelects.length === 2
+        && state.sideSelects.every((entry) => (
+          Math.abs(entry.top - firstAction.top) < 1
+          && Math.abs(entry.height - firstAction.height) < 1
+        )),
+      JSON.stringify({ selectors: state.sideSelects, action: firstAction }));
     check(`${name}: all toolbar actions share height and type scale`,
       state.actionMetrics.every((entry) => (
         Math.abs(entry.height - 32) < 1
