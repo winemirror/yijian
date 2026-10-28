@@ -123,6 +123,16 @@ console.log("== complete ranking ==");
   check("worst move reaches tier four", result.moves.at(-1).tier === 4);
   check("ranks are unique and ordered",
     result.moves.every((entry, index) => entry.rank === index + 1));
+  check("recommendation tiers never improve as rank falls",
+    result.moves.every((entry, index) => (
+      index === 0 || entry.tier >= result.moves[index - 1].tier
+    )));
+  check("equal-scoring moves share a colour tier",
+    [...new Set(result.moves.map((entry) => entry.score))].every((score) => (
+      new Set(result.moves.filter((entry) => entry.score === score).map((entry) => entry.tier)).size === 1
+    )));
+  check("the ranking gradient exposes at least four tiers",
+    new Set(result.moves.map((entry) => entry.tier)).size >= 4);
   check("piece score uses its best move",
     Object.values(result.pieces).some((piece) => (
       piece.bestMove && result.moveByCode[moveCode(piece.bestMove)].score === piece.score

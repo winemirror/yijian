@@ -3290,6 +3290,12 @@
     return tier;
   }
 
+  function relativeRecommendationTier(groupIndex, groupCount) {
+    if (groupCount <= 1 || groupIndex <= 0) return 0;
+    if (groupIndex >= groupCount - 1) return 4;
+    return clamp(Math.round((groupIndex * 4) / (groupCount - 1)), 1, 3);
+  }
+
   function buildRecommendation(board, side, analysis, key = "", ply = currentPly()) {
     const legal = generateLegalMoves(board, side);
     const legalByCode = new Map(legal.map((move) => [moveCode(move), move]));
@@ -3339,17 +3345,35 @@
     const bestWin = Math.max(...moves.map((entry) => entry.sideWin));
     const moveByCode = {};
     const bestByFrom = {};
+    let scoreGroupIndex = -1;
+    let previousScore = null;
     for (let index = 0; index < moves.length; index += 1) {
       const entry = moves[index];
+      if (previousScore === null || entry.score !== previousScore) {
+        scoreGroupIndex += 1;
+        previousScore = entry.score;
+      }
       entry.rank = index + 1;
       entry.lossCp = Math.max(0, bestCp - entry.score);
       entry.lossWin = Math.max(0, bestWin - entry.sideWin);
-      entry.tier = recommendationTierIndex(
+      entry.objectiveTier = recommendationTierIndex(
         entry.lossCp,
         entry.lossWin,
         bestWin,
         entry.sideWin
       );
+      entry.scoreGroup = scoreGroupIndex;
+    }
+
+    const scoreGroupCount = scoreGroupIndex + 1;
+    for (const entry of moves) {
+      entry.relativeTier = relativeRecommendationTier(
+        entry.scoreGroup,
+        scoreGroupCount
+      );
+      entry.tier = entry.objectiveTier >= 3
+        ? Math.max(entry.relativeTier, entry.objectiveTier)
+        : entry.relativeTier;
       entry.tierKey = RECOMMENDATION_TIERS[entry.tier].key;
       entry.tierLabel = RECOMMENDATION_TIERS[entry.tier].label;
       const code = moveCode(entry.move);
