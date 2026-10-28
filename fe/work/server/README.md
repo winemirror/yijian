@@ -44,6 +44,7 @@ GET /api/games/health
 GET /api/games/manifest
 GET /api/games/search?q=wk223
 GET /api/games/search?red=Lv%20Qin&year=1997&page=1
+GET /api/games/random
 GET /api/games/WK00223
 ```
 

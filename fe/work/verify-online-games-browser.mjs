@@ -98,7 +98,35 @@ try {
     fullPage: true
   });
 
-  await page.locator("#replayExit").click();
+  await page.locator('[data-ply="20"]').click();
+  await page.waitForFunction(() => XiangqiLocal.state.reviewPly === 20);
+  const takeoverVisible = await page.locator("#replayTakeover").isVisible();
+  check("online replay exposes takeover controls", takeoverVisible);
+  await page.locator("#replayTakeRed").click();
+  await page.waitForFunction(() => (
+    !XiangqiLocal.state.replay.active
+    && XiangqiLocal.state.live
+    && XiangqiLocal.state.game.history.length === 20
+  ));
+  const takeover = await page.evaluate(() => ({
+    live: XiangqiLocal.state.live,
+    moves: XiangqiLocal.state.game.history.length,
+    red: XiangqiLocal.state.control.r,
+    black: XiangqiLocal.state.control.b,
+    source: XiangqiLocal.state.sourceGameCode,
+    selected: XiangqiLocal.state.game.sideToMove,
+    status: document.getElementById("statusText").textContent
+  }));
+  check("red takeover continues from the selected replay ply",
+    takeover.live === true
+      && takeover.moves === 20
+      && takeover.red === "human"
+      && takeover.black === "ai"
+      && takeover.source === "WK00223"
+      && takeover.selected === "r"
+      && takeover.status.includes("第 20 手接管红方"),
+    JSON.stringify(takeover));
+
   await page.locator('[data-tab="records"]').click();
   await page.locator("#onlineGameQuery").fill("wk223");
   await page.locator("#onlineGameSearchForm").evaluate((form) => form.requestSubmit());
@@ -127,6 +155,31 @@ try {
     JSON.stringify(continued));
   check("continuation records the source game code",
     continued.source === "WK00223", JSON.stringify(continued));
+
+  const random = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  random.on("pageerror", (error) => errors.push(`random: ${error.message}`));
+  await random.goto(pageUrl, { waitUntil: "networkidle" });
+  await random.waitForFunction(() => window.XiangqiLocal);
+  await random.locator('[data-tab="records"]').click();
+  await random.locator("#onlineGameRandom").click();
+  await random.waitForFunction(() => (
+    XiangqiLocal.state.replay.active
+    && XiangqiLocal.state.replay.record
+    && XiangqiLocal.state.replay.record.meta.app === "online-game-library"
+  ));
+  const randomReplay = await random.evaluate(() => ({
+    code: XiangqiLocal.state.replay.record.id,
+    moves: XiangqiLocal.state.game.history.length,
+    input: document.getElementById("onlineGameQuery").value,
+    status: document.getElementById("onlineGameStatus").textContent
+  }));
+  check("random library button opens a random game replay",
+    /^[A-Z]{2}\d{5}$/.test(randomReplay.code)
+      && randomReplay.moves > 0
+      && randomReplay.input === randomReplay.code
+      && randomReplay.status.includes(`${randomReplay.code} 复盘`),
+    JSON.stringify(randomReplay));
+  await random.close();
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
   mobile.on("pageerror", (error) => errors.push(`mobile: ${error.message}`));
@@ -161,6 +214,26 @@ try {
     && XiangqiLocal.state.replay.record.id === "WK00223"
   ));
   check("game link opens WK00223 replay directly", true);
+  await direct.locator('[data-ply="21"]').click();
+  await direct.waitForFunction(() => XiangqiLocal.state.reviewPly === 21);
+  await direct.locator("#replayTakeBlack").click();
+  await direct.waitForFunction(() => (
+    !XiangqiLocal.state.replay.active
+    && XiangqiLocal.state.live
+    && XiangqiLocal.state.game.history.length === 21
+  ));
+  const blackTakeover = await direct.evaluate(() => ({
+    moves: XiangqiLocal.state.game.history.length,
+    red: XiangqiLocal.state.control.r,
+    black: XiangqiLocal.state.control.b,
+    side: XiangqiLocal.state.game.sideToMove
+  }));
+  check("black takeover continues from any selected ply",
+    blackTakeover.moves === 21
+      && blackTakeover.red === "ai"
+      && blackTakeover.black === "human"
+      && blackTakeover.side === "b",
+    JSON.stringify(blackTakeover));
   await direct.close();
   check("browser reports no runtime errors", errors.length === 0, errors.join(" | "));
 } finally {

@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.21.1-20261029";
+  const APP_ASSET_VERSION = "3.21.2-20261029";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -2676,6 +2676,9 @@
     replayPlay: document.getElementById("replayPlay"),
     replaySpeed: document.getElementById("replaySpeed"),
     replayExit: document.getElementById("replayExit"),
+    replayTakeover: document.getElementById("replayTakeover"),
+    replayTakeRed: document.getElementById("replayTakeRed"),
+    replayTakeBlack: document.getElementById("replayTakeBlack"),
     recordCount: document.getElementById("recordCount"),
     recordSaveCurrent: document.getElementById("recordSaveCurrent"),
     recordExportCurrent: document.getElementById("recordExportCurrent"),
@@ -2693,6 +2696,7 @@
     onlineGameBlack: document.getElementById("onlineGameBlack"),
     onlineGameEvent: document.getElementById("onlineGameEvent"),
     onlineGameYear: document.getElementById("onlineGameYear"),
+    onlineGameRandom: document.getElementById("onlineGameRandom"),
     onlineGameStatus: document.getElementById("onlineGameStatus"),
     onlineGameList: document.getElementById("onlineGameList"),
     onlineGamePrev: document.getElementById("onlineGamePrev"),
@@ -5114,6 +5118,12 @@
   if (elements.replayExit) {
     elements.replayExit.addEventListener("click", exitRecordReplay);
   }
+  if (elements.replayTakeRed) {
+    elements.replayTakeRed.addEventListener("click", () => takeoverReplay(RED));
+  }
+  if (elements.replayTakeBlack) {
+    elements.replayTakeBlack.addEventListener("click", () => takeoverReplay(BLACK));
+  }
   if (elements.replaySpeed) {
     elements.replaySpeed.addEventListener("change", () => {
       state.replay.speed = Math.max(0.5, Number(elements.replaySpeed.value) || 1);
@@ -5163,6 +5173,9 @@
       event.preventDefault();
       searchOnlineGames(1);
     });
+  }
+  if (elements.onlineGameRandom) {
+    elements.onlineGameRandom.addEventListener("click", randomOnlineGame);
   }
   if (elements.onlineGamePrev) {
     elements.onlineGamePrev.addEventListener("click", () => {
@@ -5949,9 +5962,14 @@
     setChildren(elements.onlineGameList, games.map(createOnlineGameCard));
   }
 
+  function setOnlineLibraryLoading(loading) {
+    state.onlineLibrary.loading = loading;
+    if (elements.onlineGameRandom) elements.onlineGameRandom.disabled = loading;
+  }
+
   async function searchOnlineGames(page = 1) {
     if (state.onlineLibrary.loading) return;
-    state.onlineLibrary.loading = true;
+    setOnlineLibraryLoading(true);
     setOnlineGameStatus("正在检索在线棋库…");
     const query = elements.onlineGameQuery ? elements.onlineGameQuery.value : "";
     const directCode = normalizeOnlineGameCode(query);
@@ -5979,7 +5997,29 @@
         "error"
       );
     } finally {
-      state.onlineLibrary.loading = false;
+      setOnlineLibraryLoading(false);
+    }
+  }
+
+  async function randomOnlineGame() {
+    if (state.onlineLibrary.loading) return;
+    setOnlineLibraryLoading(true);
+    setOnlineGameStatus("正在从在线棋库随机抽取一局…");
+    try {
+      const result = await fetchOnlineGameJson("/random");
+      const game = result && result.game ? result.game : null;
+      const code = game && game.code ? normalizeOnlineGameCode(game.code) : "";
+      if (!code) throw new Error("随机棋谱数据不完整");
+      if (elements.onlineGameQuery) elements.onlineGameQuery.value = code;
+      setOnlineGameStatus(`随机抽到 ${code}，正在载入复盘…`);
+      await openOnlineGame(code, "replay");
+    } catch (error) {
+      setOnlineGameStatus(
+        "随机棋谱失败：" + defaultTo(error && error.message, "unknown"),
+        "error"
+      );
+    } finally {
+      setOnlineLibraryLoading(false);
     }
   }
 
@@ -6211,7 +6251,7 @@
     return downloadFile(`yijian-${stamp}-${normalized.id}.yijian.json`, text);
   }
 
-  function gameFromRecord(record) {
+  function gameFromRecord(record, maxPlies) {
     const parsed = parseXiangqiFen(record.rules.initialFen);
     const game = new XiangqiGame();
     game.board = cloneBoard(parsed.board);
@@ -6222,7 +6262,10 @@
     game.halfmoveClock = record.clocks.halfmoveClock || 0;
     game.result = { type: "ongoing", winner: null, reason: "" };
 
-    record.moves.forEach((move, index) => {
+    const limit = Number.isFinite(Number(maxPlies))
+      ? Math.max(0, Math.min(record.moves.length, Number(maxPlies)))
+      : record.moves.length;
+    record.moves.slice(0, limit).forEach((move, index) => {
       if (move.side && move.side !== game.sideToMove) {
         throw new Error(`第 ${index + 1} 手行棋方不一致`);
       }
@@ -6246,7 +6289,9 @@
       }
     });
 
-    if (record.result.type !== "ongoing" && game.result.type === "ongoing") {
+    if (limit === record.moves.length
+      && record.result.type !== "ongoing"
+      && game.result.type === "ongoing") {
       game.result = Object.assign({}, record.result);
     }
     return game;
@@ -6319,6 +6364,61 @@
     return true;
   }
 
+  function takeoverReplay(side) {
+    if (!state.replay.active || !state.replay.record) return;
+    const record = state.replay.record;
+    const ply = currentPly();
+    let continuedGame;
+    try {
+      continuedGame = gameFromRecord(record, ply);
+    } catch (error) {
+      setStatus("接管失败：" + defaultTo(error && error.message, "unknown"));
+      return;
+    }
+    if (continuedGame.result.type !== "ongoing") {
+      setStatus("当前局面已经结束，请退回到上一手后接管");
+      return;
+    }
+
+    const playerSide = side === BLACK ? BLACK : RED;
+    const aiSide = opposite(playerSide);
+    discardRecordReplay();
+    state.session += 1;
+    aiDriverToken += 1;
+    state.game = continuedGame;
+    state.selected = null;
+    state.legalMoves = [];
+    state.live = true;
+    state.reviewPly = continuedGame.history.length;
+    state.displayAnalysis = null;
+    state.busy = false;
+    state.playing = true;
+    state.initialFen = record.rules.initialFen;
+    const initial = parseXiangqiFen(record.rules.initialFen);
+    state.initialBoard = cloneBoard(initial.board);
+    state.initialSide = initial.side;
+    state.gameId = newRecordId();
+    state.sourceGameCode = record.id;
+    state.finishedRecordQueued = false;
+    state.startedAt = Date.now();
+    state.turnStartedAt = state.startedAt;
+    state.endedAt = 0;
+    state.control[playerSide] = "human";
+    state.control[aiSide] = "ai";
+    if (!AI_LEVELS[state.levels[aiSide]] && !isPikafishLevel(state.levels[aiSide])) {
+      state.levels[aiSide] = "medium";
+    }
+    renderThinking();
+    updatePlayButton();
+    activatePanel("analysis");
+    render();
+    setStatus(
+      `已从 ${record.id} 第 ${ply} 手接管${playerSide === RED ? "红方" : "黑方"}，`
+      + `${aiSide === RED ? "红方" : "黑方"}由 AI 续下`
+    );
+    restartAIDriverFromState();
+  }
+
   function discardRecordReplay() {
     if (!state.replay.active) return;
     stopReplayPlayback();
@@ -6386,6 +6486,16 @@
     const record = state.replay.record;
     elements.replayTitle.textContent = `${record.players.red.name} 对 ${record.players.black.name}`;
     elements.replayPosition.textContent = `第 ${currentPly()} / ${state.game.history.length} 手 · 只读`;
+    const libraryGame = record.meta && record.meta.app === "online-game-library";
+    if (elements.replayTakeover) elements.replayTakeover.hidden = !libraryGame;
+    if (libraryGame && elements.replayTakeRed && elements.replayTakeBlack) {
+      const sideToMove = sideForPly(currentPly());
+      const sideName = sideToMove === RED ? "红方" : "黑方";
+      elements.replayTakeRed.title =
+        `从第 ${currentPly()} 手接管红方，黑方由 AI 续下；当前轮到${sideName}`;
+      elements.replayTakeBlack.title =
+        `从第 ${currentPly()} 手接管黑方，红方由 AI 续下；当前轮到${sideName}`;
+    }
     if (elements.replaySpeed) elements.replaySpeed.value = String(state.replay.speed);
     updateReplayButton();
   }

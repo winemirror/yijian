@@ -56,6 +56,15 @@ try {
       && event.games.every((game) => game.event.includes("World Xiangqi Championships 2015")),
     JSON.stringify(event));
 
+  const randomResponse = await fetch(`${base}/api/games/random`);
+  const random = await randomResponse.json();
+  check("random game returns a valid catalog entry",
+    randomResponse.ok
+      && random.ok === true
+      && /^[A-Z]{2}\d{5}$/.test(random.game.code)
+      && random.game.moveCount > 0,
+    JSON.stringify(random.game));
+
   const gameResponse = await fetch(`${base}/api/games/WK00223`);
   const game = await gameResponse.json();
   check("single game lookup returns complete record",
