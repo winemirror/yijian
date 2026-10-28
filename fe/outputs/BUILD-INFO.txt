@@ -1,42 +1,49 @@
-弈鉴 · 3.19 构建信息（2026-10-28）
+弈鉴 · 3.20 构建信息（2026-10-28）
 
 包名: com.yijian.xiangqi
-版本: 3.19 (versionCode 48)
+版本: 3.20 (versionCode 49)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.19.apk
-文件大小: 4397822 bytes
-SHA-256: 700B83113C9E317D5D10C0D605B53163EAE552775AE920A59335F16726F62F0F
+APK 文件: Yijian-Xiangqi-3.20.apk
+文件大小: 4407794 bytes
+SHA-256: D4793D22229220C81BC51AFCAAE01BB6951CD9C5CD435E3A79A46BF94F01354B
 
-桌面版: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 584192 bytes
-SHA-256: 0CBA11DB3C3FDAD1CA030C0693C8102C13131A0AB11EC5E329165E3D021D4E45
+桌面版: YiJian-Xiangqi-Portable-3.20.exe
+别名: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
+文件大小: 623104 bytes
+SHA-256: C3406A6848EE5024E99DBB7025D585D7FF15BBFF80D29DDB31D08776F6D9B300
 
-上一版: Yijian-Xiangqi-3.18.apk
+上一版: Yijian-Xiangqi-3.19.apk
 分支: main
-资源版本: 3.19.0-20261028
+资源版本: 3.20.0-20261028
 
 本次改动:
-  - 着法评级界面改用传统棋评术语：正着、妙手、好着、稳着、俗手、软招、无理手、漏招、恶手。
-  - 内部仍保留 10 级赢面损失阈值，统计、复盘和棋谱兼容不受影响。
-  - 高质量着法将行棋方赢面从不足 50% 提升到至少 65%，且提升不少于 25
-    个百分点时，显示金色「红方妙手 / 黑方妙手」横幅 3.2 秒。
-  - 妙手横幅与终局胜负横幅分层显示，不影响棋局结果提示。
-  - 皮卡鱼中继继续保持最近 240 手。
+  - 新增练习模式：当前行棋方棋子显示五级推荐色环，选中棋子后显示全部合法落点的
+    颜色分级和该棋子范围内的 1..N 排名。
+  - 练习强度提供标准、深入两档，并对完整本地排名和皮卡鱼首选分别展示。
+  - 皮卡鱼对局中以金色菱形标记皮卡鱼首选，不替换本地完整合法着法排名。
+  - 复盘局面可在练习模式中选子查看落点，但不会实际落子；联机与观战禁用练习模式。
+  - 顶部工具栏压缩并重排：棋子颜色、AI 速度和练习强度收进设置菜单。
+  - 执子下拉框与全部操作按钮统一高度和垂直位置，按钮统一为图标加文字。
+  - 桌面棋子字形恢复并固定为 29px；棋盘尺寸结合窗口高度自适应，常见桌面分辨率可
+    在首屏完整看到棋盘。
 
-线上入口:
+计划发布入口（尚未部署）:
   - https://syjnb.top/yijian/
-  - https://syjnb.top/downloads/Yijian-Xiangqi-3.19.apk
-  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.19.exe
+  - https://syjnb.top/downloads/Yijian-Xiangqi-3.20.apk
+  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.20.exe
 
 验证:
-  - verify-quality：10 级术语映射、红黑方妙手判定、金色横幅样式全部通过。
-  - verify-records-browser：线上术语显示、红方妙手横幅、IndexedDB、
-    导入复盘和 390px 布局全部通过。
-  - verify-pikafish、verify-records、verify-motion、verify-styles、
-    verify-mate、verify-compat、verify-net、server/verify-server 全部通过。
-  - APK versionName=3.19、versionCode=48，签名与 1.5 一致。
+  - verify-recommendations：完整着法覆盖、五级分类、标准/深入档、皮卡鱼首选、
+    复盘选子、本地设置迁移和联机禁用全部通过。
+  - verify-recommendations-browser：1280x900、1366x768、390x844 三档通过；
+    顶部按钮与执子框同高对齐，桌面棋子字号 29px，棋盘进入首屏。
+  - verify-pikafish、verify-records、verify-motion、verify-styles、verify-quality、
+    verify-mate、verify-compat、verify-net 全部通过。
+  - EXE 内嵌 9 个前端资源逐一与源码 SHA-256 比对一致。
+  - APK 内嵌 9 个前端资源逐一与源码 SHA-256 比对一致。
+  - APK versionName=3.20、versionCode=49，包名 com.yijian.xiangqi，签名与 1.5 一致。
 
 说明: 皮卡鱼常驻服务继续运行在 ss，本轮不改变服务端房间和计算参数。
