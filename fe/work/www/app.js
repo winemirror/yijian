@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.22.0-20261029";
+  const APP_ASSET_VERSION = "3.22.1-20261029";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -3797,6 +3797,45 @@
     render();
     updateRecommendationUI();
     setStatus(state.pikafishAnalysisEnabled ? "皮卡鱼分析已开启" : "皮卡鱼分析已关闭");
+    if (state.pikafishAnalysisEnabled) {
+      window.setTimeout(analyzeCurrentPositionWithPikafish, 0);
+    }
+  }
+
+  async function analyzeCurrentPositionWithPikafish() {
+    if (!pikafishAnalysisActive() || netActive()) return;
+    const session = state.session;
+    const ply = currentPly();
+    const historyLength = state.game.history.length;
+    const board = cloneBoard(currentBoard());
+    const side = state.live ? state.game.sideToMove : sideForPly(ply);
+    const historyMoves = historyToUci(state.game.history, ply);
+    setStatus("皮卡鱼分析中…");
+    try {
+      const analysis = await analyzePositionScheduled(
+        board,
+        side,
+        CURRENT_ANALYSIS_LEVEL,
+        historyMoves
+      );
+      if (
+        session !== state.session
+        || ply !== currentPly()
+        || historyLength !== state.game.history.length
+        || !pikafishAnalysisActive()
+      ) {
+        return;
+      }
+      state.displayAnalysis = analysis;
+      document.documentElement.dataset.analysisEngine =
+        analysis.engine === "pikafish" ? "pikafish" : "local";
+      render();
+      setStatus(analysis.engine === "pikafish"
+        ? `皮卡鱼分析完成 · 深度 ${analysis.depth}`
+        : "皮卡鱼未返回结果，已使用本机分析");
+    } catch (error) {
+      setStatus("皮卡鱼分析失败：" + defaultTo(error && error.message, "unknown"));
+    }
   }
 
   function render() {
@@ -3948,7 +3987,10 @@
     elements.redLabel.textContent = controlLabel(RED);
     elements.blackLabel.textContent = controlLabel(BLACK);
     if (elements.chartHint) {
-      elements.chartHint.textContent = cloudAnalysisActive() ? "皮卡鱼分析" : "每步更新";
+      const analysis = analysisForCurrentPly();
+      elements.chartHint.textContent = analysis.depth
+        ? `${analysis.engine === "pikafish" ? "皮卡鱼" : "本机"} · 深度 ${analysis.depth}`
+        : (cloudAnalysisActive() ? "皮卡鱼分析" : "每步更新");
     }
   }
 
@@ -4345,7 +4387,9 @@
     elements.bestMoveText.textContent = analysis.bestMove
       ? `最佳着法：${analysis.bestNotation || moveLabel(currentBoard(), analysis.bestMove)}`
       : "最佳着法：--";
-    elements.chartHint.textContent = analysis.depth ? `深度 ${analysis.depth}` : "每步更新";
+    elements.chartHint.textContent = analysis.depth
+      ? `${analysis.engine === "pikafish" ? "皮卡鱼" : "本机"} · 深度 ${analysis.depth}`
+      : "每步更新";
 
     const records = state.game.history;
     const analyzed = records.filter((record) => record.quality);
@@ -4898,6 +4942,9 @@
       appendChat("对手", "新对局开始，请多指教。", false);
     }
     restartAIDriverFromState();
+    if (state.pikafishAnalysisEnabled) {
+      window.setTimeout(analyzeCurrentPositionWithPikafish, 0);
+    }
   }
 
   function undo(options = {}) {
