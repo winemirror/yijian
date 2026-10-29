@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.21.2-20261029";
+  const APP_ASSET_VERSION = "3.22.0-20261029";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",
@@ -163,6 +163,7 @@
   const PRACTICE_PREF_KEY = "xiangqi.practice.enabled";
   const LEGACY_RECOMMENDATION_PREF_KEY = "xiangqi.recommendation.enabled";
   const PRACTICE_LEVEL_PREF_KEY = "xiangqi.practice.level";
+  const PIKAFISH_ANALYSIS_PREF_KEY = "xiangqi.pikafish.analysis";
   const RECOMMENDATION_TIERS = [
     { key: "best", label: "最优" },
     { key: "good", label: "好" },
@@ -2438,6 +2439,14 @@
     ));
   }
 
+  function pikafishAnalysisActive() {
+    return !!state.pikafishAnalysisEnabled && !netActive();
+  }
+
+  function cloudAnalysisActive() {
+    return !netActive() && (pikafishAnalysisActive() || gameUsesPikafish());
+  }
+
   function pikafishLevelFor(side) {
     const own = levelFor(side);
     if (isPikafishLevel(own)) return own;
@@ -2535,8 +2544,14 @@
     const requestOptions = options || {};
     analysisJobsInFlight += 1;
     try {
-      if (gameUsesPikafish() && !requestOptions.forceLocal) {
-        return await analyzeWithPikafish(board, side, requestOptions, historyMoves);
+      if (cloudAnalysisActive() && !requestOptions.forceLocal) {
+        try {
+          return await analyzeWithPikafish(board, side, requestOptions, historyMoves);
+        } catch (error) {
+          document.documentElement.dataset.pikafishAnalysisFallback =
+            (error && error.message) || String(error);
+          setStatus("皮卡鱼分析暂不可用，已回退到本机分析");
+        }
       }
       const settings = {
         depth: defaultTo(requestOptions.depth, 4),
@@ -2638,6 +2653,7 @@
     recommendationLegendStatus: document.getElementById("recommendationLegendStatus"),
     pikafishLegend: document.getElementById("pikafishLegend"),
     practiceDepth: document.getElementById("practiceDepth"),
+    pikafishAnalysisToggle: document.getElementById("pikafishAnalysisToggle"),
     topbarMore: document.querySelector(".topbar-more"),
     newGame: document.getElementById("newGame"),
     undoMove: document.getElementById("undoMove"),
@@ -2754,6 +2770,7 @@
     displayAnalysis: null,
     recommendationEnabled: true,
     practiceLevel: "standard",
+    pikafishAnalysisEnabled: false,
     onlineLibrary: {
       page: 1,
       pages: 1,
@@ -3269,6 +3286,22 @@
     }
   }
 
+  function loadPikafishAnalysisSetting() {
+    try {
+      return window.localStorage.getItem(PIKAFISH_ANALYSIS_PREF_KEY) === "1";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function savePikafishAnalysisSetting(enabled) {
+    try {
+      window.localStorage.setItem(PIKAFISH_ANALYSIS_PREF_KEY, enabled ? "1" : "0");
+    } catch (error) {
+      // 存不了不影响本次使用。
+    }
+  }
+
   function practiceAnalysisLevel() {
     return PRACTICE_ANALYSIS_LEVELS[state.practiceLevel]
       || PRACTICE_ANALYSIS_LEVELS.standard;
@@ -3689,6 +3722,13 @@
       elements.practiceDepth.value = state.practiceLevel;
       elements.practiceDepth.disabled = blockedByNet;
     }
+    if (elements.pikafishAnalysisToggle) {
+      elements.pikafishAnalysisToggle.checked = state.pikafishAnalysisEnabled;
+      elements.pikafishAnalysisToggle.disabled = blockedByNet;
+      elements.pikafishAnalysisToggle.title = blockedByNet
+        ? "联机对局中禁用皮卡鱼分析"
+        : (state.pikafishAnalysisEnabled ? "关闭皮卡鱼分析" : "开启皮卡鱼分析");
+    }
     if (elements.recommendationLegend) {
       elements.recommendationLegend.hidden = !visible;
     }
@@ -3740,6 +3780,23 @@
     );
     render();
     setStatus(level === "deep" ? "练习分析强度：深入" : "练习分析强度：标准");
+  }
+
+  function setPikafishAnalysis(enabled) {
+    if (netActive()) {
+      updateRecommendationUI();
+      setStatus("联机对局中禁用皮卡鱼分析");
+      return;
+    }
+    state.pikafishAnalysisEnabled = !!enabled;
+    savePikafishAnalysisSetting(state.pikafishAnalysisEnabled);
+    if (!state.pikafishAnalysisEnabled && Pikafish
+      && typeof Pikafish.cancelActive === "function") {
+      Pikafish.cancelActive();
+    }
+    render();
+    updateRecommendationUI();
+    setStatus(state.pikafishAnalysisEnabled ? "皮卡鱼分析已开启" : "皮卡鱼分析已关闭");
   }
 
   function render() {
@@ -3891,7 +3948,7 @@
     elements.redLabel.textContent = controlLabel(RED);
     elements.blackLabel.textContent = controlLabel(BLACK);
     if (elements.chartHint) {
-      elements.chartHint.textContent = gameUsesPikafish() ? "皮卡鱼分析" : "每步更新";
+      elements.chartHint.textContent = cloudAnalysisActive() ? "皮卡鱼分析" : "每步更新";
     }
   }
 
@@ -4998,6 +5055,11 @@
     elements.practiceDepth.addEventListener("change", () => {
       setPracticeLevel(elements.practiceDepth.value);
       if (elements.topbarMore) elements.topbarMore.open = false;
+    });
+  }
+  if (elements.pikafishAnalysisToggle) {
+    elements.pikafishAnalysisToggle.addEventListener("change", () => {
+      setPikafishAnalysis(elements.pikafishAnalysisToggle.checked);
     });
   }
   elements.redColor.addEventListener("input", () => {
@@ -8083,7 +8145,9 @@
   state.flipped = loadFlipSetting() === true;
   state.recommendationEnabled = loadRecommendationSetting();
   state.practiceLevel = loadPracticeLevel();
+  state.pikafishAnalysisEnabled = loadPikafishAnalysisSetting();
   resetGame();
+  updateRecommendationUI();
   refreshRecordLibrary();
   netInit();
   const requestedGameCode = normalizeOnlineGameCode(

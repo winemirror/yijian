@@ -1,56 +1,48 @@
-弈鉴 · 3.21 构建信息（2026-10-29）
+弈鉴 · 3.22 构建信息（2026-10-29）
 
 包名: com.yijian.xiangqi
-版本: 3.21 (versionCode 50)
+版本: 3.22 (versionCode 51)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.21.apk
-文件大小: 4412674 bytes
-SHA-256: F7154602BB1CD575D0E503EC413BCB75DFB8C8458FC2E7676B363BEF3355D3F0
+APK 文件: Yijian-Xiangqi-3.22.apk
+文件大小: 4500720 bytes
+SHA-256: EB31C946BCC00D168A3DB7274324D647CCEB500BEAF144E2C6DEEDF8F1D5C23A
 
-桌面版: YiJian-Xiangqi-Portable-3.21.exe
+桌面版: YiJian-Xiangqi-Portable-3.22.exe
 别名: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 641536 bytes
-SHA-256: 61DA17401E07A0A4F61BE436348303E909B2034C18FFF5BA3750887537137FF7
+文件大小: 649728 bytes
+SHA-256: 304F4B670F983A9D615CA0687B582BA86070107D900753ADDF40744A44BD69D6
 
-上一版: Yijian-Xiangqi-3.20.apk
+上一版: Yijian-Xiangqi-3.21.apk
 分支: main
-资源版本: 3.21.2-20261029（Web 热更新；EXE/APK 仍内嵌 3.21.0）
+资源版本: 3.22.0-20261029
 
 本次改动:
-  - 新增 Wukong 在线大师棋库：40,249 盘 ICCS 棋谱可检索、复盘和续下。
-  - 棋谱号采用两位字母加五位数字，支持 wk223 自动补全为 WK00223。
-  - 支持棋手中文名/拼音、赛事、年份、红黑方和棋谱号检索。
-  - 支持 ?game=WK00223 深链接直接打开复盘。
-  - 从在线棋谱续下时保留完整历史，用于后续重复局面和终局判断。
-  - 服务端新增 /api/games 检索与单局读取 API，棋库独立于联机信令数据。
-  - 练习模式候选颜色改为按分数分组形成排名梯度，同分同色且顺序单调。
-  - Web 热更新 3.21.1：棋子字形由 29px 调整为 25px，压缩在线棋库搜索、
-    高级筛选、结果卡片与分页文字。
-  - Web 热更新 3.21.2：在线棋库支持随机抽取一局；在线棋谱复盘可从任意
-    手接管红方或黑方，截断原谱后由玩家与 AI 继续对局。
-  - 服务端新增 /api/games/random，从完整棋库索引中等概率抽取棋谱。
-  - 同步发布博客更新说明《弈鉴 3.21：在线 Wukong 棋库》。
+  - 设置菜单新增独立的「皮卡鱼分析」选项，并持久保存用户选择。
+  - 开启后，每步赢面、最佳着法、前后局面分析和棋评优先使用皮卡鱼。
+  - 练习模式仍由本地引擎完成全部合法着法排名，保留完整候选颜色。
+  - 皮卡鱼不可达时自动回退本机分析，不阻断棋局和棋评。
+  - 联机对局和观战禁用皮卡鱼分析，避免把云端引擎辅助带入对战。
+  - 包含 3.21.1 的字号修复，以及 3.21.2 的棋库随机抽局与任意手接管。
 
 线上入口:
   - https://syjnb.top/yijian/
-  - https://syjnb.top/downloads/Yijian-Xiangqi-3.21.apk
-  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.21.exe
+  - https://syjnb.top/downloads/Yijian-Xiangqi-3.22.apk
+  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.22.exe
   - https://c.syjnb.top/api/games/health
-  - https://syjnb.top/post/yijian-3-21/
+  - https://syjnb.top/post/yijian-3-22/
 
 验证:
-  - verify-online-games-browser：公网检索、自动补全、复盘、续下、深链接、
-    随机抽取、任意手接管、桌面和手机布局全部通过。
-  - game-library API：40,249 盘、中文姓名别名、赛事/年份筛选、单局读取、
-    404/400 边界和 CORS 全部通过。
-  - verify-recommendations、verify-records、verify-pikafish、verify-motion、
+  - 皮卡鱼分析选项持久化、桌面/笔记本/手机设置界面和联机禁用全部通过。
+  - 皮卡鱼不可达时本机回退逻辑已覆盖。
+  - verify-recommendations、verify-pikafish、verify-records、verify-motion、
     verify-styles、verify-quality、verify-mate、verify-compat、verify-net、
     verify-server 全部通过。
-  - EXE 内嵌 9 个前端资源逐一与源码 SHA-256 比对一致。
-  - APK 内嵌 9 个前端资源逐一与源码 SHA-256 比对一致。
-  - APK versionName=3.21、versionCode=50，包名 com.yijian.xiangqi，签名与 1.5 一致。
+  - 在线棋库检索、随机抽取、复盘、续下、深链接和任意手接管全部通过。
+  - EXE 与 APK 内嵌的 3 个本轮变更资源逐一与源码 SHA-256 比对一致。
+  - APK versionName=3.22、versionCode=51，包名 com.yijian.xiangqi，签名与 1.5 一致。
 
-说明: 皮卡鱼常驻服务继续运行在 ss，本轮不改变服务端房间和计算参数。
+说明: 发布前检查时皮卡鱼常驻房间未在线，客户端启用皮卡鱼分析后会先尝试
+云端分析，连接失败则自动回退本机分析；常驻节点恢复后无需更新客户端。

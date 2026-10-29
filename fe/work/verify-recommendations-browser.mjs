@@ -184,6 +184,34 @@ async function exerciseViewport(browser, name, viewport) {
     JSON.stringify(practice));
   check(`${name}: practice menu closes after selection`,
     await page.evaluate(() => document.querySelector(".topbar-more").open === false));
+  if (name === "desktop") {
+    await page.evaluate(() => {
+      const toggle = document.getElementById("pikafishAnalysisToggle");
+      toggle.checked = true;
+      toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await page.waitForFunction(() => (
+      window.XiangqiLocal.state.pikafishAnalysisEnabled === true
+    ));
+    const cloud = await page.evaluate(() => ({
+      checked: document.getElementById("pikafishAnalysisToggle").checked,
+      stored: localStorage.getItem("xiangqi.pikafish.analysis"),
+      hint: document.getElementById("chartHint").textContent
+    }));
+    check(`${name}: Pikafish analysis option persists`,
+      cloud.checked === true
+        && cloud.stored === "1"
+        && cloud.hint === "皮卡鱼分析",
+      JSON.stringify(cloud));
+    await page.evaluate(() => {
+      const toggle = document.getElementById("pikafishAnalysisToggle");
+      toggle.checked = false;
+      toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await page.waitForFunction(() => (
+      window.XiangqiLocal.state.pikafishAnalysisEnabled === false
+    ));
+  }
 
   const targetSelection = await page.evaluate(() => {
     const state = window.XiangqiLocal.state;
@@ -296,6 +324,7 @@ async function exerciseViewport(browser, name, viewport) {
       marked: document.querySelectorAll(".piece[data-recommend-tier]").length,
       practiceDisabled: document.getElementById("recommendationToggle").disabled,
       depthDisabled: document.getElementById("practiceDepth").disabled,
+      pikafishAnalysisDisabled: document.getElementById("pikafishAnalysisToggle").disabled,
       redSetup: document.getElementById("redSetup").value,
       blackSetup: document.getElementById("blackSetup").value,
       redDisabled: document.getElementById("redSetup").disabled,
@@ -305,7 +334,8 @@ async function exerciseViewport(browser, name, viewport) {
       netState.recommendationVisible === false
         && netState.marked === 0
         && netState.practiceDisabled === true
-        && netState.depthDisabled === true,
+        && netState.depthDisabled === true
+        && netState.pikafishAnalysisDisabled === true,
       JSON.stringify(netState));
     check(`${name}: multiplayer locks both seats as players`,
       netState.redSetup === "player"
@@ -321,6 +351,7 @@ async function exerciseViewport(browser, name, viewport) {
       marked: document.querySelectorAll(".piece[data-recommend-tier]").length,
       practiceDisabled: document.getElementById("recommendationToggle").disabled,
       depthDisabled: document.getElementById("practiceDepth").disabled,
+      pikafishAnalysisDisabled: document.getElementById("pikafishAnalysisToggle").disabled,
       redDisabled: document.getElementById("redSetup").disabled,
       blackDisabled: document.getElementById("blackSetup").disabled
     }));
@@ -328,6 +359,7 @@ async function exerciseViewport(browser, name, viewport) {
       restored.marked > 0
         && restored.practiceDisabled === false
         && restored.depthDisabled === false
+        && restored.pikafishAnalysisDisabled === false
         && restored.redDisabled === false
         && restored.blackDisabled === false,
       JSON.stringify(restored));
