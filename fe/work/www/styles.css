@@ -309,6 +309,28 @@ button {
   width: 100%;
 }
 
+.topbar-menu .option-row {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.topbar-menu .option-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--piece-red);
+  cursor: pointer;
+}
+
+.topbar-menu .option-row input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
 .topbar-menu-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -18,12 +18,24 @@ function check(label, ok) {
 }
 
 console.log("== pikafish permanent ==");
-check("page is marked 3.21", /3\.21\.\d-2026\d{4}/.test(html));
+check("page is marked 3.22", /3\.22\.\d-2026\d{4}/.test(html));
 check("pikafish client is loaded before app", html.indexOf("pikafish.js") < html.lastIndexOf("app.js"));
 check("both sides expose three cloud levels", (html.match(/pikafish:(fast|standard|deep)/g) || []).length === 6);
+check("settings expose a dedicated Pikafish analysis option",
+  html.includes('id="pikafishAnalysisToggle"'));
 check("setup parser accepts pikafish levels", app.includes('value.startsWith("pikafish:")'));
 check("local AI remains selectable", app.includes("AI_LEVELS[level]"));
 check("mixed games enable cloud analysis", app.includes("gameUsesPikafish()"));
+check("standalone analysis option persists and routes through Pikafish",
+  app.includes("PIKAFISH_ANALYSIS_PREF_KEY")
+  && app.includes("pikafishAnalysisActive()")
+  && app.includes("cloudAnalysisActive() && !requestOptions.forceLocal"));
+check("cloud analysis failure falls back to the local engine",
+  app.includes("pikafishAnalysisFallback")
+  && app.includes("已回退到本机分析"));
+check("Pikafish analysis is disabled inside multiplayer",
+  app.includes("!!state.pikafishAnalysisEnabled && !netActive()")
+  && app.includes("联机对局中禁用皮卡鱼分析"));
 check("cloud analysis maps MultiPV moves", app.includes("findUciMove(board, side, raw.pv && raw.pv[0])"));
 check("cloud move validation rejects illegal replies", app.includes("皮卡鱼返回非法着法"));
 check("chosen move can use post-move evaluation", app.includes("derivedFromAfter"));
