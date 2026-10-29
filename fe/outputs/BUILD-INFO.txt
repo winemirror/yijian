@@ -1,23 +1,23 @@
-弈鉴 · 3.22 构建信息（2026-10-29）
+弈鉴 · 3.22.1 构建信息（2026-10-29）
 
 包名: com.yijian.xiangqi
-版本: 3.22 (versionCode 51)
+版本: 3.22.1 (versionCode 52)
 最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
 构建类型: Debug APK
 签名证书 SHA-256: 33C29CFDC5EB48421C8A27E235B304050EB3575A0A4522157B1B90314334A581（与 1.5 起同一密钥）
 
-APK 文件: Yijian-Xiangqi-3.22.apk
-文件大小: 4500720 bytes
-SHA-256: EB31C946BCC00D168A3DB7274324D647CCEB500BEAF144E2C6DEEDF8F1D5C23A
+APK 文件: Yijian-Xiangqi-3.22.1.apk
+文件大小: 4414982 bytes
+SHA-256: 53A64995D83E874CDD46FA20670EF38B4AFB9E3E7B4C2CF6CEE049540F098F66
 
-桌面版: YiJian-Xiangqi-Portable-3.22.exe
+桌面版: YiJian-Xiangqi-Portable-3.22.1.exe
 别名: YiJian-Xiangqi-Portable.exe / YiJian-Xiangqi.exe
-文件大小: 649728 bytes
-SHA-256: 304F4B670F983A9D615CA0687B582BA86070107D900753ADDF40744A44BD69D6
+文件大小: 651264 bytes
+SHA-256: 911F151BDE390E0E7205F78EE759710C117A57FC7D82345D42ACA3F9ECEF872D
 
-上一版: Yijian-Xiangqi-3.21.apk
+上一版: Yijian-Xiangqi-3.22.apk
 分支: main
-资源版本: 3.22.0-20261029
+资源版本: 3.22.1-20261029
 
 本次改动:
   - 设置菜单新增独立的「皮卡鱼分析」选项，并持久保存用户选择。
@@ -25,16 +25,21 @@ SHA-256: 304F4B670F983A9D615CA0687B582BA86070107D900753ADDF40744A44BD69D6
   - 练习模式仍由本地引擎完成全部合法着法排名，保留完整候选颜色。
   - 皮卡鱼不可达时自动回退本机分析，不阻断棋局和棋评。
   - 联机对局和观战禁用皮卡鱼分析，避免把云端引擎辅助带入对战。
+  - 3.22.1 修复开启选项后必须等到下一步才分析的问题。
+  - 保存开启状态后，重新打开应用会立即分析当前局面。
+  - 分析栏显示「皮卡鱼 · 深度 N」或「本机 · 深度 N」。
   - 包含 3.21.1 的字号修复，以及 3.21.2 的棋库随机抽局与任意手接管。
 
 线上入口:
   - https://syjnb.top/yijian/
-  - https://syjnb.top/downloads/Yijian-Xiangqi-3.22.apk
-  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.22.exe
+  - https://syjnb.top/downloads/Yijian-Xiangqi-3.22.1.apk
+  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.22.1.exe
   - https://c.syjnb.top/api/games/health
   - https://syjnb.top/post/yijian-3-22/
 
 验证:
+  - 真实皮卡鱼房间恢复，单步与 MultiPV 分析均返回成功。
+  - 公网浏览器验证：勾选即分析、落子后分析、重载后自动分析均成功。
   - 皮卡鱼分析选项持久化、桌面/笔记本/手机设置界面和联机禁用全部通过。
   - 皮卡鱼不可达时本机回退逻辑已覆盖。
   - verify-recommendations、verify-pikafish、verify-records、verify-motion、
@@ -42,7 +47,6 @@ SHA-256: 304F4B670F983A9D615CA0687B582BA86070107D900753ADDF40744A44BD69D6
     verify-server 全部通过。
   - 在线棋库检索、随机抽取、复盘、续下、深链接和任意手接管全部通过。
   - EXE 与 APK 内嵌的 3 个本轮变更资源逐一与源码 SHA-256 比对一致。
-  - APK versionName=3.22、versionCode=51，包名 com.yijian.xiangqi，签名与 1.5 一致。
+  - APK versionName=3.22.1、versionCode=52，包名 com.yijian.xiangqi，签名与 1.5 一致。
 
-说明: 发布前检查时皮卡鱼常驻房间未在线，客户端启用皮卡鱼分析后会先尝试
-云端分析，连接失败则自动回退本机分析；常驻节点恢复后无需更新客户端。
+说明: 皮卡鱼常驻节点已恢复。客户端优先使用云端分析，连接失败时自动回退本机分析。
