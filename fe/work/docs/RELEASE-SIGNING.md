@@ -7,8 +7,8 @@ certificate `33C29CFD...A581`. It is public and must be considered compromised.
 The current APK artifacts remain useful only for historical verification.
 
 Changing an Android signing certificate prevents an in-place update of the
-existing `com.yijian.xiangqi` package. The owner must choose and communicate a
-migration path before distributing a newly signed build.
+existing `com.yijian.xiangqi` package. Starting with `3.23.0`, Yijian uses the
+new package id `com.yijian.xiangqi.v2` and a protected RSA 4096 release key.
 
 ## Android key setup
 
@@ -36,15 +36,13 @@ Never place the keystore, passwords, or CI files containing them in Git.
 
 ## Migration decision
 
-Choose one path before the first release with the new certificate:
+The selected direct-distribution migration is:
 
-1. **New applicationId (recommended for direct APK distribution).** Build with
-   `-PyijianApplicationId=com.yijian.xiangqi.v2`, publish it as a new app, and
-   explain how users export/import records.
-2. **Store-managed signing.** If the app will move to Google Play, enroll the
-   new release key as an upload key with Play App Signing according to the
-   store migration process. A direct APK using the old certificate cannot
-   silently become a differently signed update.
+- `3.22.1` and earlier: `com.yijian.xiangqi`, legacy certificate;
+- `3.23.0` and later: `com.yijian.xiangqi.v2`, protected release certificate.
+
+The two packages can coexist. Local records must be exported from the old app
+and imported into the new one.
 
 Do not reuse the old applicationId with a new certificate and describe the
 result as an in-place upgrade.
@@ -58,16 +56,13 @@ npm ci
 $env:JAVA_HOME = "C:\Program Files\Zulu\zulu-21"
 $env:ANDROID_HOME = "<Android SDK>"
 
-$env:YIJIAN_KEYSTORE_PATH = "<outside repo>\yijian-release.p12"
-$env:YIJIAN_KEYSTORE_PASSWORD = "<secret>"
-$env:YIJIAN_KEY_ALIAS = "yijian-release"
-$env:YIJIAN_KEY_PASSWORD = "<secret>"
+. .\scripts\load-release-key.ps1
 
 node scripts/build-android.mjs release --offline
 
 $env:APKSIGNER = "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat"
 $env:AAPT2 = "$env:ANDROID_HOME\build-tools\36.0.0\aapt2.exe"
-$env:YIJIAN_RELEASE_CERT_SHA256 = "<new certificate SHA-256>"
+$env:YIJIAN_RELEASE_CERT_SHA256 = "2E79234BD04BAFC2976B77031ABD62572A2C6FDCC02DB35DEFDB55BD67D19ECB"
 powershell -File scripts\verify-apk.ps1 `
   -Apk android\app\build\outputs\apk\release\app-release.apk `
   -ExpectedCertificate $env:YIJIAN_RELEASE_CERT_SHA256 `
@@ -113,3 +108,7 @@ powershell -File work\xiangqi-exe\build.ps1 -Sign
 Alternatively set `YIJIAN_WINDOWS_PFX_PATH` and
 `YIJIAN_WINDOWS_PFX_PASSWORD`. The script verifies that the resulting
 Authenticode status is `Valid` before creating the plain-name alias.
+
+The `3.23.0` Windows artifact is unsigned because no trusted Windows CA
+certificate is available. It is a development/direct-download build, not a
+CA-verified executable.

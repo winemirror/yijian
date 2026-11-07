@@ -1,9 +1,9 @@
 {
   "name": "yijian",
-  "version": "3.22.1",
+  "version": "3.23.0",
   "private": true,
   "description": "Yijian local and online Chinese chess",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "commonjs",
   "engines": {
     "node": ">=22.0.0"

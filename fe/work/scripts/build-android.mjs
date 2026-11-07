@@ -72,6 +72,7 @@ const wrapper = process.env.YIJIAN_GRADLE
 const task = mode === "release" ? "assembleRelease" : "assembleDebug";
 const args = [task];
 if (offline) args.push("--offline");
+if (process.env.YIJIAN_GRADLE_DAEMON !== "1") args.push("--no-daemon");
 run(wrapper, args, androidDir);
 
 const artifact = path.join(

@@ -7,7 +7,7 @@
   const MATE = 900000;
   const IS_WORKER = typeof window === "undefined";
   const GLOBAL_SCOPE = IS_WORKER ? self : window;
-  const APP_ASSET_VERSION = "3.22.1-20261029";
+  const APP_ASSET_VERSION = "3.23.0-20261108";
   const PIECE_NAMES = {
     r: "車",
     n: "馬",

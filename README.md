@@ -3,8 +3,11 @@
 弈鉴是一个本地优先的中国象棋应用。同一套 Web 源码可运行在浏览器、
 Windows 便携程序和 Android 中。
 
-当前主线为 **3.22.1**。功能实现、架构、验证和打包说明见
+当前主线为 **3.23.0**。功能实现、架构、验证和打包说明见
 [`fe/README.md`](fe/README.md)。
+
+3.23.0 使用新的 applicationId `com.yijian.xiangqi.v2`。它不能覆盖升级
+`com.yijian.xiangqi` 3.22.1，但可以与旧版并存；旧版棋谱需先导出再导入。
 
 ## 目录
 
@@ -53,6 +56,6 @@ git status
 3.22.1 及更早版本使用过已公开的 Android debug 证书。先阅读
 [`SECURITY.md`](SECURITY.md)，不要把那些 APK 当作未来版本的安全发布模板。
 
-本仓库目前 **没有声明自有代码的开源许可证**。在所有者明确选择许可证前，
-外部复用和贡献授权状态并不清晰。第三方组件和棋谱数据的来源见
+自有代码采用 MIT License。第三方组件和棋谱数据仍适用各自来源与许可，
+详见
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

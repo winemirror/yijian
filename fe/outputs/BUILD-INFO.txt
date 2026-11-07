@@ -1,3 +1,35 @@
+弈鉴 · 3.23.0 构建信息（2026-11-08）
+
+包名: com.yijian.xiangqi.v2（签名迁移新包，不能覆盖升级 3.22.1）
+版本: 3.23.0 (versionCode 53)
+最低 Android: 7.0 (API 24) / 目标 Android: 16 (API 36)
+构建类型: Release APK
+签名证书 SHA-256: 2E79234BD04BAFC2976B77031ABD62572A2C6FDCC02DB35DEFDB55BD67D19ECB
+
+APK 文件: Yijian-Xiangqi-3.23.0.apk
+文件大小: 3436434 bytes
+SHA-256: 289DA0A98136173588D5C1BF957732B0509CA570DCF1DC402640831EEB4EE160
+
+桌面版: YiJian-Xiangqi-Portable-3.23.0.exe
+文件大小: 651264 bytes
+SHA-256: E19392E160C83BED572A10E120DDB6E8AF249F562D9F5E50C2F2FDF48D43165D
+代码签名: 未签名；没有受信任 Windows CA 证书
+
+资源版本: 3.23.0-20261108
+
+本次改动:
+  - 迁移到仓库外保护的 RSA 4096 release key，停止使用已公开的 debug key。
+  - 使用新 applicationId，旧 3.22.1 无法原地覆盖升级。
+  - APK 改为非 debuggable release 构建。
+  - 加入可复现依赖锁、自动 release/APK 校验、CI 和 Dependabot。
+  - 服务端房间密码失败预算与可信代理 IP 识别。
+  - 自有代码采用 MIT License。
+
+线上入口:
+  - https://syjnb.top/yijian/
+  - https://syjnb.top/downloads/Yijian-Xiangqi-3.23.0.apk
+  - https://syjnb.top/downloads/YiJian-Xiangqi-Portable-3.23.0.exe
+
 弈鉴 · 3.22.1 构建信息（2026-10-29）
 
 包名: com.yijian.xiangqi

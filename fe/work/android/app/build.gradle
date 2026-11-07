@@ -4,11 +4,11 @@ android {
     namespace = "com.yijian.xiangqi"
     compileSdk = rootProject.ext.compileSdkVersion
 
-    // A new applicationId is required when migrating away from the exposed
-    // legacy signing certificate. Keep the old id as the default so the build
-    // does not silently fork unless release engineering opts in explicitly.
+    // 3.23.0 migrates away from the exposed legacy signing certificate.
+    // A new applicationId is required because Android cannot upgrade in place
+    // when the signing certificate changes.
     def configuredApplicationId = project.findProperty("yijianApplicationId")
-        ?: "com.yijian.xiangqi"
+        ?: "com.yijian.xiangqi.v2"
     def releaseStorePath = System.getenv("YIJIAN_KEYSTORE_PATH")
     def releaseStorePassword = System.getenv("YIJIAN_KEYSTORE_PASSWORD")
     def releaseKeyAlias = System.getenv("YIJIAN_KEY_ALIAS")
@@ -37,8 +37,8 @@ android {
         applicationId configuredApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 52
-        versionName "3.22.1"
+        versionCode 53
+        versionName "3.23.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

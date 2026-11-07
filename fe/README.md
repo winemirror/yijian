@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| 当前版本 | 3.22.1（versionCode 52） |
+| 当前版本 | 3.23.0（versionCode 53） |
 | 运行形态 | 浏览器离线版 / Windows 便携 EXE / Android APK |
 | 前端 | 原生 JavaScript，零框架、零构建步骤 |
 | 服务端 | Node.js，零依赖（WebSocket 按 RFC 6455 手写） |
@@ -307,7 +307,7 @@ NNUE 引擎的主要差距。
 
 ### 3.12 Android
 
-- Capacitor 8 工程，`minSdkVersion 24`、`targetSdkVersion 36`，包名 `com.yijian.xiangqi`。
+- Capacitor 8 工程，`minSdkVersion 24`、`targetSdkVersion 36`，3.23.0 迁移包名为 `com.yijian.xiangqi.v2`。
 - `YiJianLanPlugin` 用原生 UDP 复刻桌面启动器的局域网能力，方法一一对应
   （`announce` / `stopAnnounce` / `send` / `inbox` / `rooms` / `status`），
   所以网页层两种外壳共用同一套接口。
