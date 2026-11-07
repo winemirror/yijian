@@ -1,0 +1,54 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fe/work
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: fe/work/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate
+
+      - name: Reject tracked signing material
+        shell: bash
+        run: |
+          tracked="$(git ls-files -- '*.keystore' '*.jks' '*.p12' '*.pfx')"
+          if [ -n "$tracked" ]; then
+            echo "Signing material must not be tracked:"
+            echo "$tracked"
+            exit 1
+          fi
+
+      - name: Check release invariants
+        run: node scripts/verify-release.mjs
+
+      - name: Run local verification
+        run: npm run verify

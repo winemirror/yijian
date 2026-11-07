@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(here, "..", "..");
 const BENCH = path.join(repo, "w-2", "work", "engine-bench", "harness.mjs");
-const FONTLIB = path.join(repo, "w-2", "work", "font-tools", "fontlib.mjs");
+const FONTLIB = path.join(here, "scripts", "fontlib.mjs");
 const { loadEngine, RED } = await import(pathToFileURL(BENCH).href);
 const { readSfnt, readCodepoints } = await import(pathToFileURL(FONTLIB).href);
 

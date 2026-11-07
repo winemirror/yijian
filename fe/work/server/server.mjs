@@ -20,6 +20,9 @@
 //   TURN_TTL      临时凭证有效期（秒），默认 600，会夹到 60 ~ 86400
 //   MAX_ROOMS     同时存在的房间上限，默认 500
 //   ROOM_TTL_MS   房间空闲多久后回收，默认 30 分钟
+//   TRUST_PROXY   设为 1 时信任反向代理传入的 X-Forwarded-For
+//   JOIN_FAILURE_LIMIT      密码窗口内最多失败次数，默认 10
+//   JOIN_FAILURE_WINDOW_MS  密码失败窗口，默认 60 秒
 
 import http from "node:http";
 import crypto from "node:crypto";
@@ -36,6 +39,14 @@ let TURN_SECRET = (process.env.TURN_SECRET || "").trim();
 let TURN_TTL = Number(process.env.TURN_TTL || 600);
 const MAX_ROOMS = Number(process.env.MAX_ROOMS || 500);
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 30 * 60 * 1000);
+let TRUST_PROXY = process.env.TRUST_PROXY === "1";
+let JOIN_FAILURE_LIMIT = boundedInteger(process.env.JOIN_FAILURE_LIMIT, 10, 1, 100);
+let JOIN_FAILURE_WINDOW_MS = boundedInteger(
+  process.env.JOIN_FAILURE_WINDOW_MS,
+  60000,
+  1000,
+  24 * 60 * 60 * 1000
+);
 
 const PROTO = 1;
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +59,13 @@ const HEARTBEAT_MS = 25000;
 const MAX_ROOMS_PER_CLIENT = 3;
 const RATE_BURST = 40;             // 令牌桶容量
 const RATE_PER_SEC = 20;           // 每秒补充
+const joinFailureBuckets = new Map();
+
+function boundedInteger(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(number)));
+}
 
 // 去混淆字符集：没有 0/O/1/I/L，方便口头念房间码
 const ROOM_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -266,6 +284,35 @@ function passwordMatches(room, password) {
   return hashPassword(room.id, password) === room.passwordHash;
 }
 
+function joinFailureKey(client) {
+  return client.address || client.id;
+}
+
+function joinFailureState(client, now = Date.now()) {
+  const key = joinFailureKey(client);
+  let bucket = joinFailureBuckets.get(key);
+  if (!bucket || now - bucket.startedAt >= JOIN_FAILURE_WINDOW_MS) {
+    bucket = { count: 0, startedAt: now };
+    joinFailureBuckets.set(key, bucket);
+  }
+  const retryAfterMs = Math.max(0, JOIN_FAILURE_WINDOW_MS - (now - bucket.startedAt));
+  return {
+    blocked: bucket.count >= JOIN_FAILURE_LIMIT,
+    retryAfterMs
+  };
+}
+
+function recordJoinFailure(client) {
+  const state = joinFailureState(client);
+  const bucket = joinFailureBuckets.get(joinFailureKey(client));
+  bucket.count += 1;
+  return state;
+}
+
+function clearJoinFailures(client) {
+  joinFailureBuckets.delete(joinFailureKey(client));
+}
+
 function leaveRoom(client, reason) {
   const room = client.roomId ? rooms.get(client.roomId) : null;
   client.roomId = null;
@@ -386,13 +433,24 @@ function handleMessage(client, raw) {
     case "room.join": {
       if (!client.helloed) return sendError(client, "not_helloed", "send hello first");
       if (client.roomId) return sendError(client, "already_in_room", "leave the current room");
+      const failureState = joinFailureState(client);
+      if (failureState.blocked) {
+        const retryAfter = Math.max(1, Math.ceil(failureState.retryAfterMs / 1000));
+        return sendError(
+          client,
+          "join_rate_limited",
+          `密码失败次数过多，请 ${retryAfter} 秒后再试`
+        );
+      }
       const wanted = String(message.roomId || "").toUpperCase();
       log(`room.join ${wanted} <- ${client.id}`);
       const room = rooms.get(wanted);
       if (!room) return sendError(client, "no_room", "房间不存在或已结束");
       if (!passwordMatches(room, passwordOf(message))) {
+        recordJoinFailure(client);
         return sendError(client, "bad_password", "房间密码不正确");
       }
+      clearJoinFailures(client);
       const kind = message.want === "spectate" ? "spectator" : "player";
       if (kind === "player") {
         const players = membersOf(room).filter((member) => member.kind === "player");
@@ -563,6 +621,15 @@ server.on("upgrade", (request, socket) => {
     helloed: false,
     roomsCreated: 0,
     roomId: null,
+    address: (() => {
+      if (TRUST_PROXY) {
+        const forwarded = String(request.headers["x-forwarded-for"] || "")
+          .split(",")[0]
+          .trim();
+        if (forwarded) return forwarded.slice(0, 64);
+      }
+      return request.socket.remoteAddress || "unknown";
+    })(),
     tokens: RATE_BURST,
     tokenAt: Date.now()
   };
@@ -623,6 +690,11 @@ const sweepTimer = setInterval(() => {
       log(`room ${id} expired`);
     }
   }
+  for (const [key, bucket] of joinFailureBuckets) {
+    if (now - bucket.startedAt > JOIN_FAILURE_WINDOW_MS * 2) {
+      joinFailureBuckets.delete(key);
+    }
+  }
 }, 60000);
 sweepTimer.unref();
 
@@ -633,6 +705,13 @@ export function listen(overrides = {}) {
   if (overrides.turnUrl !== undefined) TURN_URL = overrides.turnUrl;
   if (overrides.turnSecret !== undefined) TURN_SECRET = overrides.turnSecret;
   if (overrides.turnTtl !== undefined) TURN_TTL = overrides.turnTtl;
+  if (overrides.trustProxy !== undefined) TRUST_PROXY = !!overrides.trustProxy;
+  if (overrides.joinFailureLimit !== undefined) {
+    JOIN_FAILURE_LIMIT = Math.max(1, Math.floor(overrides.joinFailureLimit));
+  }
+  if (overrides.joinFailureWindowMs !== undefined) {
+    JOIN_FAILURE_WINDOW_MS = Math.max(10, Math.floor(overrides.joinFailureWindowMs));
+  }
 
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -658,6 +737,7 @@ export function close() {
   }
   clients.clear();
   rooms.clear();
+  joinFailureBuckets.clear();
   gameLibrary.close();
   return new Promise((resolve) => server.close(() => resolve()));
 }

@@ -581,20 +581,25 @@ powershell -File work\xiangqi-exe\build.ps1
 ### 5.4 打包 Android APK
 
 ```powershell
-# 1) 同步前端资源（assets/public 不在版本库里，必须每次同步）
-Copy-Item work\www\* work\android\app\src\main\assets\public\ -Force
+# 1) 依赖（Node >= 22）
+cd fe\work
+npm ci
 
 # 2) 环境
 $env:JAVA_HOME   = "C:\Program Files\Zulu\zulu-21"
 $env:ANDROID_HOME = "<Android SDK 路径>"      # 也可由 android\local.properties 指定
 $env:GRADLE_USER_HOME = "<可写的 Gradle Home>"
 
-# 3) 离线构建
-<Gradle 8.14.3>\bin\gradle.bat -p work\android assembleDebug --offline
+# 3) 调试构建（不要公开分发）
+npm run build:android:debug -- --offline
+
+# 4) 正式构建（需要仓库外的签名环境变量）
+npm run build:android:release -- --offline
 ```
 
 注意事项：
 
+- `npm run build:android:*` 会调用 Capacitor sync，再通过仓库内的 Gradle wrapper 构建。
 - `work\gradle-home` 里的 `wrapper/`、`native/`、`daemon/` 是只读链接，
   Gradle 无法在里面写原生库；请把 `caches` 目录挂到**可写的临时 Gradle Home** 下再用，
   不要直接对仓库内的 `gh*` 目录执行 `git clean`（会穿过链接删掉缓存）。
@@ -605,17 +610,24 @@ $env:GRADLE_USER_HOME = "<可写的 Gradle Home>"
 ### 5.5 版本号与签名
 
 - `work\android\app\build.gradle` 里的 `versionCode` / `versionName` 每版递增。
-- APK 使用仓库里的 `yijian-debug.keystore` 签名，**与 1.5 起同一个密钥**，
-  证书 SHA-256 为 `33C29CFD…A581`，这样老版本可以覆盖升级。
-  打包后可以核对：
+- 3.22.1 及更早版本使用的 debug 证书已经从仓库移除，并应视为已泄露。
+- release 构建只接受仓库外的 `YIJIAN_KEYSTORE_*` / `YIJIAN_KEY_*` 环境变量；
+  缺任一变量时 Gradle 会拒绝 release 任务。
+- 换证书不能覆盖升级旧包。迁移方案、密钥生成和产物验证见
+  [`work/docs/RELEASE-SIGNING.md`](work/docs/RELEASE-SIGNING.md)。
+- 正式产物的版本/签名检查：
 
 ```powershell
-& "<SDK>\build-tools\35.0.0\apksigner.bat" verify --print-certs <apk>
-& "<SDK>\build-tools\35.0.0\aapt2.exe" dump badging <apk> | Select-String package:
+$env:APKSIGNER = "<SDK>\build-tools\36.0.0\apksigner.bat"
+$env:AAPT2 = "<SDK>\build-tools\36.0.0\aapt2.exe"
+$env:YIJIAN_RELEASE_CERT_SHA256 = "<新证书 SHA-256>"
+powershell -File scripts\verify-apk.ps1 `
+  -Apk <apk> -ExpectedCertificate $env:YIJIAN_RELEASE_CERT_SHA256 `
+  -ApkSigner $env:APKSIGNER -Aapt2 $env:AAPT2
 ```
 
-发版流程：提交代码 → 更新 `outputs\BUILD-INFO.txt`（版本、大小、SHA-256、本次改动）
-→ 打与版本号一致的 tag。
+发版流程：提交代码 → 运行全部验证 → 更新 `outputs\BUILD-INFO.txt`
+（版本、大小、SHA-256、本次改动）→ 打与版本号一致的 tag。
 
 ---
 

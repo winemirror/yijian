@@ -1,0 +1,26 @@
+{
+  "name": "yijian",
+  "version": "3.22.1",
+  "private": true,
+  "description": "Yijian local and online Chinese chess",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "verify": "node scripts/verify.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "sync:android": "cap sync android",
+    "build:android:debug": "node scripts/build-android.mjs debug",
+    "build:android:release": "node scripts/build-android.mjs release"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/core": "8.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0",
+    "wawoff2": "2.0.1"
+  }
+}

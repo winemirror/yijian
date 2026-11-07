@@ -114,6 +114,10 @@ echo "==> 写 systemd 单元"
 ENV_LINES="Environment=PORT=$PORT
 Environment=STUN_URL=$STUN_HOST
 Environment=GAME_LIBRARY_DIR=$APP_DIR/data/game-library"
+if [ "${INSTALL_NGINX:-0}" = "1" ]; then
+  ENV_LINES="$ENV_LINES
+Environment=TRUST_PROXY=1"
+fi
 if [ -n "$TURN_URL" ] && [ -n "$TURN_SECRET" ]; then
   ENV_LINES="$ENV_LINES
 Environment=TURN_URL=$TURN_URL

@@ -372,6 +372,67 @@ try {
   check("固定房间码用例完成", false, String(error && error.stack || error));
 }
 
+// 第五轮：密码失败预算。
+console.log("== 密码失败限流 ==");
+try {
+  const port6 = await listen({
+    host: "127.0.0.1",
+    port: 0,
+    stunUrl: "",
+    turnUrl: "",
+    turnSecret: "",
+    joinFailureLimit: 2,
+    joinFailureWindowMs: 50,
+  });
+
+  const host = await connect(port6);
+  host.send({ t: "hello", proto: 1, name: "限流房主" });
+  await host.next();
+  host.send({
+    t: "room.create",
+    name: "限流房",
+    visibility: "private",
+    password: "correct",
+  });
+  const created = await host.next();
+  const roomId = created.room && created.room.id;
+
+  const visitor = await connect(port6);
+  visitor.send({ t: "hello", proto: 1, name: "访客" });
+  await visitor.next();
+
+  visitor.send({ t: "room.join", roomId, want: "play", password: "wrong-1" });
+  const firstFailure = await visitor.next();
+  check("第一次密码失败正常拒绝",
+    firstFailure.t === "error" && firstFailure.code === "bad_password",
+    JSON.stringify(firstFailure));
+
+  visitor.send({ t: "room.join", roomId, want: "play", password: "wrong-2" });
+  const secondFailure = await visitor.next();
+  check("第二次密码失败正常拒绝",
+    secondFailure.t === "error" && secondFailure.code === "bad_password",
+    JSON.stringify(secondFailure));
+
+  visitor.send({ t: "room.join", roomId, want: "play", password: "correct" });
+  const limited = await visitor.next();
+  check("达到失败预算后即使密码正确也暂时拒绝",
+    limited.t === "error" && limited.code === "join_rate_limited",
+    JSON.stringify(limited));
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  visitor.send({ t: "room.join", roomId, want: "play", password: "correct" });
+  const recovered = await visitor.next();
+  check("失败窗口结束后正确密码可以加入",
+    recovered.t === "room.joined" && recovered.room.id === roomId,
+    JSON.stringify(recovered.room));
+
+  host.close();
+  visitor.close();
+  await close();
+} catch (error) {
+  check("密码失败限流用例完成", false, String(error && error.stack || error));
+}
+
 console.log("");
 if (problems.length === 0) {
   console.log("SERVER CHECKS PASSED");

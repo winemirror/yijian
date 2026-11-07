@@ -33,6 +33,9 @@ node server.mjs
 | `TURN_TTL` | `600` | 临时凭证有效期（秒），会夹到 60 ~ 86400 |
 | `MAX_ROOMS` | `500` | 同时存在的房间上限 |
 | `ROOM_TTL_MS` | 1800000 | 房间空闲多久后回收 |
+| `TRUST_PROXY` | 空 | 仅在服务只经可信反向代理暴露时设为 `1`，用于读取 `X-Forwarded-For` |
+| `JOIN_FAILURE_LIMIT` | `10` | 同一来源在窗口内允许的密码失败次数 |
+| `JOIN_FAILURE_WINDOW_MS` | `60000` | 密码失败计数窗口 |
 
 ## 在线棋库
 
@@ -106,7 +109,8 @@ node verify-server.mjs
 
 会用真实 WebSocket 客户端跑完：ICE 下发、建房、玩家加入、座位已满、改观战、
 信令透传、房间列表、`/health`、房主离开解散、非法 JSON 与不存在房间的处理，
-以及 TURN 凭证的 HMAC 校验、有效期、多 URL 合并与"缺 secret 时不下发"。
+以及 TURN 凭证的 HMAC 校验、有效期、多 URL 合并、"缺 secret 时不下发"
+和房间密码失败预算。
 
 ## 部署
 
@@ -136,8 +140,12 @@ Environment=STUN_URL=stun:你的域名:3478
 Environment=TURN_URL=turn:你的IP:3478?transport=udp,turn:你的IP:3478?transport=tcp
 Environment=TURN_SECRET=与coturn的static-auth-secret一致
 Environment=TURN_TTL=600
+Environment=TRUST_PROXY=1
 ExecStart=/usr/bin/node /opt/yijian/server.mjs
 ```
+
+`TRUST_PROXY=1` 只应在 8787 端口不对公网开放、且请求确实来自受信反向代理时使用。
+直连部署不要开启，否则客户端可以伪造 `X-Forwarded-For` 绕过失败预算。
 
 ### 2. TLS 反代（**必须**）
 
@@ -210,4 +218,5 @@ ufw allow 49160:49200/udp
 - 中继端口段按 `coturn.conf` 的 min-port/max-port 限制并发路数，
   人多时要么扩端口段，要么单独加一台 TURN。
 - 服务端不存棋局，重启会让在线房间失效（房间码与密码一并失效，客户端重连重建即可）。
-- 房间密码只用于挡误入：服务端不限制试错次数，也不做账号体系；房间码的随机性仍是主要防线。
+- 房间密码只用于挡误入：默认同一来源每分钟允许 10 次失败，但没有账号体系，
+  重连/更换来源仍可能继续尝试；房间码的随机性仍是主要防线。

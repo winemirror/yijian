@@ -49,7 +49,8 @@ local.properties
 # 音效素材包（已选用的 mp3 仍在 outputs/sfx 中保留）
 **/work/sfx/packs/
 
-# 正式发布密钥；yijian-debug.keystore 是保持升级签名一致的调试密钥，故意入库
+# 所有签名密钥都只保存在仓库外；CI 会拒绝任何被跟踪的 keystore。
+*.keystore
 *.jks
 *.p12
 *.pfx

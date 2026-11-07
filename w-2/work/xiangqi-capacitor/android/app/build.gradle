@@ -17,18 +17,8 @@ android {
         }
     }
     // Pinned so the debug build keeps exactly the signing identity used for 1.5.
-    signingConfigs {
-        debug {
-            storeFile file('yijian-debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
-        }
-    }
     buildTypes {
-        debug {
-            signingConfig signingConfigs.debug
-        }
+        debug {}
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
